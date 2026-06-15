@@ -33,10 +33,12 @@ private:
     uint32_t _last_battery_publish = 0;
     uint32_t _last_activity_ms = 0;
     uint32_t _last_wake_sample_ms = 0;
+    uint32_t _reset_press_start_ms = 0;
     int _saved_brightness = 80;
     uint8_t _last_published_battery = 255;
     uint8_t _wake_sample_count = 0;
     bool _reset_requested = false;
+    bool _reset_pressing = false;
     bool _sleeping = false;
 
     bool syncLatestMqttValue(bool refresh_ui);
@@ -55,5 +57,6 @@ private:
     void createUi();
     void destroyUi();
 
-    static void handleResetClicked(lv_event_t* event);
+    static void handleResetPressed(lv_event_t* event);
+    static void handleResetReleased(lv_event_t* event);
 };

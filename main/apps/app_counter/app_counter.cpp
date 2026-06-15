@@ -25,6 +25,7 @@ static constexpr float WAKE_ACCEL_Y_THRESHOLD = 0.30f;
 static constexpr float WAKE_ACCEL_Z_THRESHOLD = 0.35f;
 static constexpr uint8_t WAKE_CONFIRM_SAMPLES = 3;
 static constexpr uint32_t NETWORK_WAKE_RECOVERY_DELAY_MS = 2000;
+static constexpr uint32_t RESET_LONG_PRESS_MS = 2000;
 
 bool s_network_recover_pending = false;
 uint32_t s_network_recover_after_ms = 0;
@@ -52,6 +53,8 @@ void AppCounter::onOpen()
     mclog::tagInfo(getAppInfo().name, "on open");
     _key_manager = std::make_unique<input::KeyManager>();
     _reset_requested = false;
+    _reset_pressing = false;
+    _reset_press_start_ms = 0;
     _last_status_update = 0;
     _last_time_update = 0;
     _last_battery_publish = 0;
@@ -159,6 +162,8 @@ void AppCounter::onClose()
     }
     _key_manager.reset();
     _reset_requested = false;
+    _reset_pressing = false;
+    _reset_press_start_ms = 0;
 
     LvglLockGuard lock;
     destroyUi();
@@ -373,10 +378,12 @@ void AppCounter::createUi()
     lv_obj_set_size(_button_reset, 210, 72);
     lv_obj_align(_button_reset, LV_ALIGN_CENTER, 0, 70);
     lv_obj_set_style_radius(_button_reset, 18, 0);
-    lv_obj_add_event_cb(_button_reset, AppCounter::handleResetClicked, LV_EVENT_CLICKED, this);
+    lv_obj_add_event_cb(_button_reset, AppCounter::handleResetPressed, LV_EVENT_PRESSED, this);
+    lv_obj_add_event_cb(_button_reset, AppCounter::handleResetReleased, LV_EVENT_RELEASED, this);
+    lv_obj_add_event_cb(_button_reset, AppCounter::handleResetReleased, LV_EVENT_PRESS_LOST, this);
 
     lv_obj_t* reset_label = lv_label_create(_button_reset);
-    lv_label_set_text(reset_label, "RESET");
+    lv_label_set_text(reset_label, "HOLD RESET");
     lv_obj_set_style_text_font(reset_label, &lv_font_montserrat_24, 0);
     lv_obj_center(reset_label);
 
@@ -402,11 +409,32 @@ void AppCounter::destroyUi()
     }
 }
 
-void AppCounter::handleResetClicked(lv_event_t* event)
+void AppCounter::handleResetPressed(lv_event_t* event)
 {
     auto* app = static_cast<AppCounter*>(lv_event_get_user_data(event));
-    if (app) {
-        app->markActivity();
+    if (!app) {
+        return;
+    }
+
+    app->_reset_pressing = true;
+    app->_reset_press_start_ms = GetHAL().millis();
+    app->markActivity();
+}
+
+void AppCounter::handleResetReleased(lv_event_t* event)
+{
+    auto* app = static_cast<AppCounter*>(lv_event_get_user_data(event));
+    if (!app || !app->_reset_pressing) {
+        return;
+    }
+
+    const uint32_t held_ms = GetHAL().millis() - app->_reset_press_start_ms;
+
+    app->_reset_pressing = false;
+    app->_reset_press_start_ms = 0;
+    app->markActivity();
+
+    if (held_ms >= RESET_LONG_PRESS_MS) {
         app->_reset_requested = true;
     }
 }
