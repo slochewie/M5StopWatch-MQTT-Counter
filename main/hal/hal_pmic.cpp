@@ -256,6 +256,13 @@ void Hal::pmicEnterAppSleep()
 {
     set_pmic_app_sleep(true);
     mclog::tagInfo(_tag, "app sleep: battery polling slowed");
+
+    if (_pm1) {
+        const auto result = _pm1->setI2cSleepTime(1);
+        mclog::tagInfo(_tag,
+                       "PMIC I2C idle sleep enabled: 1s result={}",
+                       static_cast<int>(result));
+    }
 }
 
 void Hal::pmicExitAppSleep()
@@ -264,6 +271,11 @@ void Hal::pmicExitAppSleep()
     mclog::tagInfo(_tag, "app wake: battery polling restored");
 
     if (_pm1) {
+        const auto sleep_result = _pm1->setI2cSleepTime(0);
+        mclog::tagInfo(_tag,
+                       "PMIC I2C idle sleep disabled result={}",
+                       static_cast<int>(sleep_result));
+
         uint16_t battery_mv = 0;
         if (_pm1->readVbat(&battery_mv) == M5PM1_OK) {
             update_bat_level_from_mv(battery_mv);

@@ -31,8 +31,8 @@ static constexpr uint8_t BMI270_ANY_MOTION_STATUS_MASK = 0x40;
 static constexpr float HANGING_Y_MIN = 0.70f;
 static constexpr float HANGING_Z_ABS_MAX = 0.45f;
 
-static constexpr float WAKE_Y_MAX = 0.15f;
-static constexpr float WAKE_Z_MIN = 0.55f;
+static constexpr float WAKE_Y_MAX = -0.20f;
+static constexpr float WAKE_Z_MIN = 0.75f;
 
 static constexpr uint8_t SLEEP_CONFIRM_SAMPLES = 8;
 static constexpr uint8_t WAKE_CONFIRM_SAMPLES = 3;
@@ -55,12 +55,17 @@ bool s_last_pmg0_level_valid = false;
 uint8_t s_last_pmg0_level = 0;
 uint32_t s_last_pmg0_sample_ms = 0;
 uint8_t s_pmg0_wake_confirm_count = 0;
+bool s_motion_wake_candidate = false;
+uint32_t s_motion_wake_candidate_ms = 0;
 
 void resetPmg0Sampler()
 {
     s_last_pmg0_level_valid = false;
     s_last_pmg0_level = 0;
     s_last_pmg0_sample_ms = 0;
+    s_pmg0_wake_confirm_count = 0;
+    s_motion_wake_candidate = false;
+    s_motion_wake_candidate_ms = 0;
 }
 
 bool samplePmg0IfDue(const char* reason)
@@ -162,6 +167,17 @@ bool isWakeOrientation()
            imu.accelZ >= WAKE_Z_MIN;
 }
 
+void armMotionWakeCandidate(const char* reason)
+{
+    s_motion_wake_candidate = true;
+    s_motion_wake_candidate_ms = GetHAL().millis();
+    s_wake_orientation_count = 0;
+
+    mclog::tagInfo(TAG,
+                   "PMG0/BMI270 motion candidate armed: {}",
+                   reason ? reason : "unknown");
+}
+
 void disconnectNetworkForSleep()
 {
     mclog::tagInfo(TAG, "network sleep: pause MQTT/Wi-Fi and stop radio");
@@ -225,6 +241,11 @@ void enterSleep()
     mclog::tagInfo(TAG, "display sleep enter");
     disconnectNetworkForSleep();
     GetHAL().pmicEnterAppSleep();
+
+    // M5GFX/LovyanGFX supported display sleep:
+    // LGFXBase::sleep() calls panel->setBrightness(0) and panel->setSleep(true).
+    // Keep the explicit backlight-off call as a conservative fallback.
+    GetHAL().getDisplay().sleep();
     GetHAL().setBackLightBrightness(0);
 
 #if USE_PMIC_SLEEP
@@ -251,7 +272,13 @@ void exitSleep()
 
     mclog::tagInfo(TAG, "display sleep wake");
     GetHAL().pmicExitAppSleep();
+
+    // M5GFX/LovyanGFX supported display wake:
+    // LGFXBase::wakeup() calls panel->setSleep(false) and restores panel brightness.
+    // Then restore the HAL/backlight setting used by the app UI.
+    GetHAL().getDisplay().wakeup();
     GetHAL().setBackLightBrightness(s_saved_brightness > 0 ? s_saved_brightness : 80);
+
     restoreNetworkAfterWake();
     resetPmg0Sampler();
 }
@@ -261,6 +288,8 @@ void resetIdleState()
     s_last_activity_ms = GetHAL().millis();
     s_sleep_orientation_count = 0;
     s_wake_orientation_count = 0;
+    s_motion_wake_candidate = false;
+    s_motion_wake_candidate_ms = 0;
 }
 
 }  // namespace
@@ -309,22 +338,39 @@ void update()
         }
 
         if (samplePmg0IfDue("sleep-loop")) {
-            mclog::tagInfo(TAG, "PMG0/BMI270 filtered wake");
-            exitSleep();
-            return;
+            // BMI270 any-motion is intentionally broad.  When the StopWatch is
+            // hanging from a lanyard, walking can trip the same motion
+            // interrupt.  Treat PMG0/BMI270 as only a wake candidate, then
+            // require the measured handheld orientation before turning the
+            // display/network back on.
+            armMotionWakeCandidate("sleep-loop");
         }
 
         if (sampleImuIfDue()) {
-            if (isWakeOrientation()) {
+            if (s_motion_wake_candidate && isWakeOrientation()) {
                 if (s_wake_orientation_count < WAKE_CONFIRM_SAMPLES) {
                     ++s_wake_orientation_count;
                 }
+
+                mclog::tagInfo(TAG,
+                               "orientation wake candidate {}/{}",
+                               static_cast<int>(s_wake_orientation_count),
+                               static_cast<int>(WAKE_CONFIRM_SAMPLES));
             } else {
+                if (s_motion_wake_candidate && !isWakeOrientation()) {
+                    const auto& imu = GetHAL().getImuData();
+                    mclog::tagInfo(TAG,
+                                   "motion ignored; not handheld orientation: y={:.2f} z={:.2f}",
+                                   imu.accelY,
+                                   imu.accelZ);
+                }
                 s_wake_orientation_count = 0;
             }
 
-            if (s_wake_orientation_count >= WAKE_CONFIRM_SAMPLES) {
+            if (s_motion_wake_candidate && s_wake_orientation_count >= WAKE_CONFIRM_SAMPLES) {
+                mclog::tagInfo(TAG, "PMG0/BMI270 orientation-confirmed wake");
                 exitSleep();
+                return;
             }
         }
 
@@ -397,6 +443,8 @@ void markActivity()
     s_last_activity_ms = GetHAL().millis();
     s_sleep_orientation_count = 0;
     s_wake_orientation_count = 0;
+    s_motion_wake_candidate = false;
+    s_motion_wake_candidate_ms = 0;
 }
 
 void wake()

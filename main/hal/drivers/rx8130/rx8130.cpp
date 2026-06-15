@@ -101,7 +101,11 @@ void RX8130_Class::setTime(struct tm *time)
 {
     uint8_t rbuf = 0;
 
-    time->tm_year -= 100;
+    // struct tm::tm_year is years since 1900.
+    // RX8130 stores only the last two digits of the year, so convert without
+    // mutating the caller's struct tm. Mutating tm_year here made callers log
+    // 2026 as 1926 after setTime().
+    const int rtc_year = (time->tm_year >= 100) ? (time->tm_year - 100) : time->tm_year;
 
     // set STOP bit before changing clock/calendar
     i2c_bus_read_byte(_i2c_dev, RX8130_REG_CTRL0, &rbuf);
@@ -110,7 +114,7 @@ void RX8130_Class::setTime(struct tm *time)
 
     uint8_t date[7] = {dec2bcd(time->tm_sec),       dec2bcd(time->tm_min),  dec2bcd(time->tm_hour),
                        dec2bcd(time->tm_wday),      dec2bcd(time->tm_mday), dec2bcd(time->tm_mon + 1),
-                       dec2bcd(time->tm_year % 100)};
+                       dec2bcd(rtc_year % 100)};
 
     i2c_bus_write_bytes(_i2c_dev, RX8130_REG_SEC, 7, date);
 
