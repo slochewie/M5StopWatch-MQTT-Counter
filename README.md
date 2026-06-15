@@ -119,6 +119,14 @@ See [`docs/architecture.md`](docs/architecture.md) for more detail.
 | MQTT sync concept | ![MQTT sync](docs/screenshots/mqtt-sync.svg) |
 | Sleep mode concept | ![Sleep mode](docs/screenshots/sleep-mode.svg) |
 
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [MQTT Integration](docs/mqtt.md)
+- [Building and Flashing](docs/building.md)
+- [Power Management](docs/power-management.md)
+- [Screenshots](docs/screenshots/README.md)
+
 ## Development Environment
 
 This project is developed and flashed with Espressif ESP-IDF.

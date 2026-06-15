@@ -1,61 +1,40 @@
 # Power Management
 
-This is the current known-good StopWatch counter power-management baseline.
+Power management for the Counter app is under active development.
 
-Confirmed on hardware:
+## Current Status
 
-- Counter app idles after 30 seconds of inactivity.
-- Display brightness is set to zero during idle.
-- ESP32-S3 light sleep is used in short cycles.
-- M5PM1 rails are kept powered.
-- MQTT and battery publishing remain active.
-- Device resumes from KEYA, KEYB, touch, and BMI270 motion.
-- Lanyard-to-handheld motion works as expected.
+- Display/light-sleep helper code exists in the Counter app.
+- IMU-orientation wake sampling exists for future wake behavior.
+- Touch and physical button wake paths are planned.
+- MQTT/network recovery is scheduled after wake.
+- App-owned automatic display timeout is currently disabled while system-wide sleep management is being sorted out.
 
-## Hardware path
+## Goals
 
-The working motion path is:
+- Reduce battery consumption during inactivity.
+- Wake quickly from button, touch, or motion.
+- Avoid false wakes while hanging from a lanyard.
+- Keep MQTT state synchronized after wake.
+- Preserve reliable button behavior.
 
-BMI270 any-motion -> BMI270 INT1 -> IMU_INT -> Q7 -> PMG0_RTC_IMU_INT -> M5PM1 GPIO0.
+## Current Wake Logic
 
-## Orientation fallback
+The Counter app currently contains orientation wake logic based on accelerometer samples.
 
-The fallback orientation check is still present:
+The intended wake condition is based on movement from the lanyard-hanging orientation toward the normal hand-held use orientation.
 
-- Y less than 0.30
-- Z greater than 0.35
-- 3 consecutive samples
-- 100 ms sample interval
+## Known Limitations
 
-Reference positions:
+- Automatic sleep timeout is currently disabled.
+- IMU wake behavior still needs real-world tuning.
+- Network and MQTT reconnection after sleep may need more testing.
+- Deeper PMIC sleep modes are still being evaluated.
 
-- Hanging from lanyard: Y about +1.0, Z about 0.0, X about 0.0
-- Handheld: Y about -0.4, Z about +0.9, X about 0.0
+## Future Work
 
-## M5PM1 setup
-
-M5PM1 GPIO0 is configured as the shared RTC and IMU wake input:
-
-- PMG0_RTC_IMU_INT equals M5PM1_GPIO_NUM_0
-- input mode
-- pull-up enabled
-- falling edge
-- wake enabled
-- wake function selected
-- external wake flag cleared at boot
-
-## BMI270 setup
-
-BMI270 is configured for any-motion interrupt output on INT1:
-
-- direct BMI270 I2C handle created after sensor init
-- INT1 configured active-low
-- non-latched interrupt for this baseline
-- any-motion enabled on all axes
-- duration filter: 3 samples
-- threshold: about 250 mg
-- any-motion mapped to INT1
-
-## Keep this baseline
-
-The 100 ms timer fallback is intentionally still present. Keep this as the rollback point before removing polling or changing sleep depth.
+- Move sleep behavior into a system-wide sleep manager.
+- Tune IMU wake thresholds.
+- Evaluate L1 sleep behavior with IMU wake.
+- Improve MQTT recovery after wake.
+- Add clear user-facing sleep/wake behavior documentation once finalized.

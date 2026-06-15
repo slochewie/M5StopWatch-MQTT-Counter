@@ -1,21 +1,27 @@
 # Screenshots
 
-Add screenshots of:
+This directory contains README and documentation images for the M5StopWatch MQTT Counter project.
 
-- Main counter screen
-- Increment action
-- Decrement action
-- Reset action
-- Sleep mode
-- MQTT synchronization
-- Multi-device synchronization
+## Launcher
 
-Recommended filenames:
+| File | Description |
+| --- | --- |
+| `launcher-counter-selected.svg` | Counter app selected in the StopWatch launcher. |
 
-- main-screen.png
-- increment.png
-- decrement.png
-- reset.png
-- sleep-mode.png
-- mqtt-sync.png
-- multi-device-sync.png
+## Counter App
+
+| File | Description |
+| --- | --- |
+| `main-screen.svg` | Main Counter app screen. |
+| `increment.svg` | Counter after increment. |
+| `decrement.svg` | Counter after decrement. |
+| `reset.svg` | Reset state / long-press reset behavior. |
+| `diagnostics.svg` | Diagnostics/status mockup. |
+| `mqtt-sync.svg` | MQTT synchronization concept. |
+| `sleep-mode.svg` | Sleep mode concept. |
+
+## Notes
+
+Most screenshots are SVG documentation mockups based on the actual LVGL layout and project behavior.
+
+They are intended for README clarity, not pixel-perfect device captures.
