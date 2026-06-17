@@ -118,8 +118,6 @@ void bat_reading_task(void* param)
 #define PMIC_SLEEP_PMG0_EDGE_MODE PMIC_SLEEP_PMG0_EDGE_FACTORY
 #endif
 
-
-
 void Hal::pmic_init()
 {
     mclog::tagInfo(_tag, "pmic init");
@@ -134,7 +132,7 @@ void Hal::pmic_init()
     _pm1->setI2cSleepTime(0);
     _pm1->setI2cSleepTime(0);
     _pm1->setLedEnLevel(false);
-   
+
     uint8_t boot_wake_src = 0;
     if (_pm1->getWakeSource(&boot_wake_src, M5PM1_CLEAN_ONCE) == M5PM1_OK) {
         mclog::tagInfo(_tag, "PMIC boot wake source: 0x{:02X}", static_cast<int>(boot_wake_src));
@@ -176,6 +174,8 @@ void Hal::pmic_init()
     }
 
     pmicLogPmg0State("boot-after-pmic-init");
+    mclog::tagInfo(_tag, "PMIC power config after init:");
+    _pm1->debugDumpPowerConfig();
 
     xTaskCreate(bat_reading_task, "bat_reading", 4 * 1024, NULL, 1, NULL);
 }
@@ -240,6 +240,9 @@ bool Hal::pmicShutdownForSleep()
                        static_cast<int>(pmg0_level));
     }
 
+    mclog::tagInfo(_tag, "PMIC power config before shutdown:");
+    _pm1->debugDumpPowerConfig();
+
     GetHAL().delay(100);
 
     const auto result = _pm1->shutdown();
@@ -258,10 +261,16 @@ void Hal::pmicEnterAppSleep()
     mclog::tagInfo(_tag, "app sleep: battery polling slowed");
 
     if (_pm1) {
+        mclog::tagInfo(_tag, "=== PMIC entering app sleep ===");
+        _pm1->debugDumpPowerConfig();
+
         const auto result = _pm1->setI2cSleepTime(1);
         mclog::tagInfo(_tag,
                        "PMIC I2C idle sleep enabled: 1s result={}",
                        static_cast<int>(result));
+
+        mclog::tagInfo(_tag, "PMIC power config after enabling I2C idle sleep:");
+        _pm1->debugDumpPowerConfig();
     }
 }
 
@@ -271,10 +280,16 @@ void Hal::pmicExitAppSleep()
     mclog::tagInfo(_tag, "app wake: battery polling restored");
 
     if (_pm1) {
+        mclog::tagInfo(_tag, "=== PMIC exiting app sleep ===");
+        _pm1->debugDumpPowerConfig();
+
         const auto sleep_result = _pm1->setI2cSleepTime(0);
         mclog::tagInfo(_tag,
                        "PMIC I2C idle sleep disabled result={}",
                        static_cast<int>(sleep_result));
+
+        mclog::tagInfo(_tag, "PMIC power config after disabling I2C idle sleep:");
+        _pm1->debugDumpPowerConfig();
 
         uint16_t battery_mv = 0;
         if (_pm1->readVbat(&battery_mv) == M5PM1_OK) {
