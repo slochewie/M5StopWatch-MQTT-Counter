@@ -32,6 +32,9 @@ private:
     std::unique_ptr<input::KeyManager> _key_manager;
 
     bool _destroy_menu    = false;
+    bool _rebuild_menu    = false;
     bool _need_warm_reset = false;
     int _magic_count      = 0;
+
+    void rebuildMenuSections();
 };

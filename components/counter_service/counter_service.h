@@ -18,4 +18,9 @@ const char* batteryTopic();
 const char* deviceName();
 const char* wifiSsid();
 
+bool isWifiEnabled();
+bool isMqttEnabled();
+void setWifiEnabled(bool enabled, bool saveToSettings = true);
+void setMqttEnabled(bool enabled, bool saveToSettings = true);
+
 }  // namespace counter_service

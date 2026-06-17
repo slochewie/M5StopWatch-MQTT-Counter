@@ -4,6 +4,7 @@
 #include <hal/hal.h>
 #include <apps/common/network/mqtt_service.h>
 #include <apps/common/network/wifi_service.h>
+#include <hal/utils/settings/settings.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -23,6 +24,9 @@ namespace {
 static constexpr const char* TAG = "CounterService";
 static constexpr const char* TIME_TOPIC = "system/time/epoch";
 static constexpr const char* LOCAL_TIMEZONE = "PST8PDT,M3.2.0,M11.1.0";
+static constexpr const char* SETTINGS_NS = "counter_service";
+static constexpr const char* WIFI_ENABLED_KEY = "wifi_enabled";
+static constexpr const char* MQTT_ENABLED_KEY = "mqtt_enabled";
 static constexpr time_t MIN_VALID_EPOCH = 1700000000;  // 2023-11-14 sanity floor.
 static constexpr uint32_t BATTERY_SKIP_LOG_INTERVAL_MS = 30000;
 static constexpr uint32_t BATTERY_PUBLISH_HEARTBEAT_MS = 300000;
@@ -34,6 +38,8 @@ std::string s_battery_topic;
 bool s_loaded = false;
 bool s_started = false;
 bool s_has_latest = false;
+bool s_wifi_enabled = true;
+bool s_mqtt_enabled = true;
 int32_t s_latest_value = 0;
 portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 uint32_t s_last_battery_skip_log_ms = 0;
@@ -42,9 +48,31 @@ uint8_t s_last_battery_publish_percent = BATTERY_UNKNOWN_PERCENT;
 
 void applyLocalTimezone()
 {
-    // Store this in HAL settings too. HAL::rtc_init() otherwise defaults to GMT0,
-    // which makes App Setup and the launcher header show UTC.
     GetHAL().setTimezone(LOCAL_TIMEZONE);
+}
+
+void applyNetworkPauseState()
+{
+    common::wifi::setRecoveryPaused(!s_wifi_enabled);
+    common::mqtt::setRecoveryPaused(!s_wifi_enabled || !s_mqtt_enabled);
+    if (!s_wifi_enabled || !s_mqtt_enabled) {
+        s_started = false;
+    }
+}
+
+void loadNetworkToggles()
+{
+    Settings settings(SETTINGS_NS, false);
+    s_wifi_enabled = settings.GetBool(WIFI_ENABLED_KEY, true);
+    s_mqtt_enabled = settings.GetBool(MQTT_ENABLED_KEY, true);
+    applyNetworkPauseState();
+}
+
+void saveNetworkToggles()
+{
+    Settings settings(SETTINGS_NS, true);
+    settings.SetBool(WIFI_ENABLED_KEY, s_wifi_enabled);
+    settings.SetBool(MQTT_ENABLED_KEY, s_mqtt_enabled);
 }
 
 std::string deriveBatteryTopic(const std::string& counter_topic)
@@ -68,6 +96,7 @@ void loadRuntimeConfig()
 {
     applyLocalTimezone();
     s_config = device_config::load();
+    loadNetworkToggles();
 
     auto defaults = device_config::defaults();
     if (s_config.device_name.empty()) {
@@ -84,12 +113,14 @@ void loadRuntimeConfig()
     s_battery_topic = deriveBatteryTopic(s_counter_topic);
     s_loaded = true;
 
-    ESP_LOGI(TAG, "Loaded config: device=%s, broker=%s, topic=%s, battery=%s, ssid=%s",
+    ESP_LOGI(TAG, "Loaded config: device=%s, broker=%s, topic=%s, battery=%s, ssid=%s, wifi=%s, mqtt=%s",
              s_config.device_name.c_str(),
              s_config.mqtt_uri.c_str(),
              s_counter_topic.c_str(),
              s_battery_topic.c_str(),
-             s_config.wifi_ssid.empty() ? "<empty>" : s_config.wifi_ssid.c_str());
+             s_config.wifi_ssid.empty() ? "<empty>" : s_config.wifi_ssid.c_str(),
+             s_wifi_enabled ? "on" : "off",
+             s_mqtt_enabled ? "on" : "off");
 }
 
 void setLatestValue(int32_t value)
@@ -199,8 +230,6 @@ void handleTimeData(const char* payload)
         return;
     }
 
-    // Keep the hardware RTC in sync with the corrected system epoch. HAL stores
-    // the timezone in NVS, so Launcher and App Setup use Pacific local time.
     GetHAL().syncSystemTimeToRtc();
 
     std::tm local_tm = {};
@@ -258,6 +287,11 @@ bool ensureMqttStarted()
         loadRuntimeConfig();
     }
 
+    if (!s_wifi_enabled || !s_mqtt_enabled) {
+        applyNetworkPauseState();
+        return false;
+    }
+
     if (!common::wifi::isConnected()) {
         return false;
     }
@@ -267,6 +301,7 @@ bool ensureMqttStarted()
         return true;
     }
 
+    common::mqtt::setRecoveryPaused(false);
     common::mqtt::subscribe(s_counter_topic.c_str(), 1, handleMqttMessage);
     common::mqtt::subscribe(TIME_TOPIC, 1, handleMqttMessage);
 
@@ -295,6 +330,13 @@ void begin()
         loadRuntimeConfig();
     }
 
+    applyNetworkPauseState();
+
+    if (!s_wifi_enabled) {
+        ESP_LOGI(TAG, "Wi-Fi disabled by Settings; network start skipped");
+        return;
+    }
+
     common::wifi::Config wifi_config = {
         .ssid = s_config.wifi_ssid,
         .password = s_config.wifi_password,
@@ -305,20 +347,36 @@ void begin()
         return;
     }
 
+    if (!s_mqtt_enabled) {
+        ESP_LOGI(TAG, "MQTT disabled by Settings; MQTT start skipped");
+        return;
+    }
+
     (void)ensureMqttStarted();
 }
 
 void recoverConnection()
 {
-    // Sleep manager intentionally pauses Wi-Fi recovery before stopping Wi-Fi.
-    // Do not attempt Wi-Fi or MQTT recovery while paused.
+    if (!s_loaded) {
+        loadRuntimeConfig();
+    }
+
+    applyNetworkPauseState();
+
+    if (!s_wifi_enabled) {
+        return;
+    }
+
     if (common::wifi::isRecoveryPaused()) {
         return;
     }
 
     common::wifi::recoverConnection();
 
-    // MQTT recovery only makes sense once Wi-Fi is actually connected.
+    if (!s_mqtt_enabled) {
+        return;
+    }
+
     if (!common::wifi::isConnected()) {
         return;
     }
@@ -333,16 +391,21 @@ void recoverConnection()
 
 bool isStarted()
 {
-    return s_started || common::mqtt::isStarted();
+    return s_wifi_enabled && s_mqtt_enabled && (s_started || common::mqtt::isStarted());
 }
 
 bool isConnected()
 {
-    return common::mqtt::isConnected();
+    return s_wifi_enabled && s_mqtt_enabled && common::mqtt::isConnected();
 }
 
 bool publishValue(int32_t value)
 {
+    if (!s_wifi_enabled || !s_mqtt_enabled) {
+        ESP_LOGI(TAG, "Publish skipped, network disabled by Settings");
+        return false;
+    }
+
     if (!ensureMqttStarted()) {
         ESP_LOGW(TAG, "Publish skipped, MQTT not ready");
         return false;
@@ -373,9 +436,10 @@ bool publishValue(int32_t value)
 
 bool publishBatteryPercentage(uint8_t percent)
 {
-    // Battery publishing is opportunistic. During wake/reconnect, this can be
-    // called frequently by the status bar/battery UI. Do not let that path spam
-    // logs or force repeated MQTT recovery attempts before the network is ready.
+    if (!s_wifi_enabled || !s_mqtt_enabled) {
+        return false;
+    }
+
     if (!common::wifi::isConnected() || !common::mqtt::isConnected()) {
         logBatteryPublishSkippedThrottled();
         return false;
@@ -433,9 +497,21 @@ bool takeLatestValue(int32_t& value)
 
 const char* statusText()
 {
+    if (!s_loaded) {
+        loadRuntimeConfig();
+    }
+
+    if (!s_wifi_enabled) {
+        return "WiFi Off";
+    }
+
     if (!common::wifi::isConnected()) {
         common::wifi::recoverConnection();
         return common::wifi::statusText();
+    }
+
+    if (!s_mqtt_enabled) {
+        return "MQTT Off";
     }
 
     if (!common::mqtt::isConnected()) {
@@ -468,6 +544,76 @@ const char* deviceName()
 const char* wifiSsid()
 {
     return s_config.wifi_ssid.empty() ? common::wifi::ssid() : s_config.wifi_ssid.c_str();
+}
+
+bool isWifiEnabled()
+{
+    if (!s_loaded) {
+        loadRuntimeConfig();
+    }
+    return s_wifi_enabled;
+}
+
+bool isMqttEnabled()
+{
+    if (!s_loaded) {
+        loadRuntimeConfig();
+    }
+    return s_mqtt_enabled;
+}
+
+void setWifiEnabled(bool enabled, bool saveToSettings)
+{
+    if (!s_loaded) {
+        loadRuntimeConfig();
+    }
+
+    if (s_wifi_enabled == enabled) {
+        return;
+    }
+
+    s_wifi_enabled = enabled;
+    if (!s_wifi_enabled) {
+        s_started = false;
+    }
+
+    if (saveToSettings) {
+        saveNetworkToggles();
+    }
+
+    applyNetworkPauseState();
+    ESP_LOGI(TAG, "Wi-Fi setting changed: %s", s_wifi_enabled ? "on" : "off");
+
+    if (s_wifi_enabled) {
+        begin();
+    }
+}
+
+void setMqttEnabled(bool enabled, bool saveToSettings)
+{
+    if (!s_loaded) {
+        loadRuntimeConfig();
+    }
+
+    if (s_mqtt_enabled == enabled) {
+        return;
+    }
+
+    s_mqtt_enabled = enabled;
+    if (!s_mqtt_enabled) {
+        s_started = false;
+    }
+
+    if (saveToSettings) {
+        saveNetworkToggles();
+    }
+
+    applyNetworkPauseState();
+    ESP_LOGI(TAG, "MQTT setting changed: %s", s_mqtt_enabled ? "on" : "off");
+
+    if (s_wifi_enabled && s_mqtt_enabled) {
+        (void)ensureMqttStarted();
+    }
 }
 
 }  // namespace counter_service

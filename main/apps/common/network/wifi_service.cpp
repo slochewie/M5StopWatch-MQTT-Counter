@@ -113,6 +113,18 @@ void eventHandler(void* arg, esp_event_base_t event_base, int32_t event_id, void
         return;
     }
 
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_STOP) {
+        s_started = false;
+        s_connected = false;
+        s_associated = false;
+        s_connecting = false;
+        if (s_event_group != nullptr) {
+            xEventGroupClearBits(s_event_group, WIFI_CONNECTED_BIT);
+        }
+        ESP_LOGI(TAG, "Wi-Fi STA stopped");
+        return;
+    }
+
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
         auto* event = static_cast<wifi_event_sta_connected_t*>(event_data);
         s_associated = true;
@@ -131,6 +143,7 @@ void eventHandler(void* arg, esp_event_base_t event_base, int32_t event_id, void
         auto* event = static_cast<wifi_event_sta_disconnected_t*>(event_data);
         s_connected = false;
         s_associated = false;
+        s_connecting = false;
         if (s_event_group != nullptr) {
             xEventGroupClearBits(s_event_group, WIFI_CONNECTED_BIT);
         }
@@ -389,7 +402,22 @@ void setRecoveryPaused(bool paused)
 
     s_recovery_paused = paused;
     if (paused) {
-        ESP_LOGI(TAG, "Wi-Fi recovery paused");
+        ESP_LOGI(TAG, "Wi-Fi recovery paused; stopping STA");
+
+        if (s_initialized) {
+            esp_wifi_disconnect();
+            esp_wifi_stop();
+        }
+
+        s_started = false;
+        s_connected = false;
+        s_associated = false;
+        s_connecting = false;
+        s_retry_count = 0;
+        s_dhcp_stall_count = 0;
+        if (s_event_group != nullptr) {
+            xEventGroupClearBits(s_event_group, WIFI_CONNECTED_BIT);
+        }
     } else {
         ESP_LOGI(TAG, "Wi-Fi recovery resumed");
     }
@@ -418,7 +446,7 @@ const char* ssid()
 const char* statusText()
 {
     if (s_recovery_paused) {
-        return "WiFi AP";
+        return "WiFi pause";
     }
     if (!s_initialized || !s_started) {
         return "WiFi --";

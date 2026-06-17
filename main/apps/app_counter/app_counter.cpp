@@ -9,6 +9,8 @@
 #include <mooncake_log.h>
 #include <smooth_lvgl.hpp>
 #include <esp_sleep.h>
+#include <nvs.h>
+#include <nvs_flash.h>
 #include <cstdio>
 #include <counter_service.h>
 
@@ -18,7 +20,7 @@ using namespace smooth_ui_toolkit::lvgl_cpp;
 namespace {
 static constexpr uint32_t BATTERY_PUBLISH_INTERVAL_MS = 60000;
 static constexpr uint32_t TIME_REFRESH_INTERVAL_MS = 1000;
-static constexpr uint32_t DISPLAY_SLEEP_TIMEOUT_MS = 0;  // Phase 1: disabled; system sleep manager will replace app-owned sleep
+static constexpr uint32_t DISPLAY_SLEEP_TIMEOUT_MS = 0;  // Disabled; system SleepManager owns app sleep.
 static constexpr uint32_t IMU_WAKE_SAMPLE_INTERVAL_MS = 100;
 static constexpr uint64_t PHASE2_LIGHT_SLEEP_INTERVAL_US = IMU_WAKE_SAMPLE_INTERVAL_MS * 1000ULL;
 static constexpr float WAKE_ACCEL_Y_THRESHOLD = 0.30f;
@@ -26,6 +28,8 @@ static constexpr float WAKE_ACCEL_Z_THRESHOLD = 0.35f;
 static constexpr uint8_t WAKE_CONFIRM_SAMPLES = 3;
 static constexpr uint32_t NETWORK_WAKE_RECOVERY_DELAY_MS = 2000;
 static constexpr uint32_t RESET_LONG_PRESS_MS = 2000;
+static constexpr const char* COUNTER_NVS_NAMESPACE = "counter";
+static constexpr const char* COUNTER_NVS_KEY = "last_value";
 
 bool s_network_recover_pending = false;
 uint32_t s_network_recover_after_ms = 0;
@@ -34,6 +38,39 @@ void enterPhase2LightSleepTick()
 {
     esp_sleep_enable_timer_wakeup(PHASE2_LIGHT_SLEEP_INTERVAL_US);
     (void)esp_light_sleep_start();
+}
+
+bool loadPersistedCount(int32_t& value)
+{
+    nvs_handle_t handle;
+    const esp_err_t open_result = nvs_open(COUNTER_NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (open_result != ESP_OK) {
+        return false;
+    }
+
+    const esp_err_t read_result = nvs_get_i32(handle, COUNTER_NVS_KEY, &value);
+    nvs_close(handle);
+    return read_result == ESP_OK;
+}
+
+void savePersistedCount(int32_t value)
+{
+    nvs_handle_t handle;
+    const esp_err_t open_result = nvs_open(COUNTER_NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (open_result != ESP_OK) {
+        mclog::tagWarn("Counter", "NVS open failed while saving count: {}", esp_err_to_name(open_result));
+        return;
+    }
+
+    esp_err_t result = nvs_set_i32(handle, COUNTER_NVS_KEY, value);
+    if (result == ESP_OK) {
+        result = nvs_commit(handle);
+    }
+    nvs_close(handle);
+
+    if (result != ESP_OK) {
+        mclog::tagWarn("Counter", "NVS save failed for count {}: {}", static_cast<long>(value), esp_err_to_name(result));
+    }
 }
 }
 
@@ -66,6 +103,10 @@ void AppCounter::onOpen()
     _sleeping = false;
     s_network_recover_pending = false;
     s_network_recover_after_ms = 0;
+
+    if (loadPersistedCount(_count)) {
+        mclog::tagInfo(getAppInfo().name, "loaded persisted count: {}", static_cast<long>(_count));
+    }
 
     {
         LvglLockGuard lock;
@@ -176,7 +217,12 @@ bool AppCounter::syncLatestMqttValue(bool refresh_ui)
         return false;
     }
 
-    _count = mqtt_value;
+    if (_count != mqtt_value) {
+        _count = mqtt_value;
+        savePersistedCount(_count);
+    } else {
+        _count = mqtt_value;
+    }
 
     if (refresh_ui) {
         LvglLockGuard lock;
@@ -192,6 +238,7 @@ void AppCounter::increment()
     syncLatestMqttValue(false);
 
     ++_count;
+    savePersistedCount(_count);
     (void)counter_service::publishValue(_count);
     LvglLockGuard lock;
     refreshValue();
@@ -204,6 +251,7 @@ void AppCounter::decrement()
     if (_count > 0) {
         --_count;
     }
+    savePersistedCount(_count);
     (void)counter_service::publishValue(_count);
     LvglLockGuard lock;
     refreshValue();
@@ -212,6 +260,7 @@ void AppCounter::decrement()
 void AppCounter::reset()
 {
     _count = 0;
+    savePersistedCount(_count);
     (void)counter_service::publishValue(_count);
     LvglLockGuard lock;
     refreshValue();

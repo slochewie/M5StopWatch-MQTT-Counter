@@ -8,6 +8,7 @@
 #include <mooncake.h>
 #include <mooncake_log.h>
 #include <assets/assets.h>
+#include <counter_service.h>
 
 using namespace mooncake;
 using namespace view;
@@ -25,17 +26,8 @@ void AppSetup::onCreate()
     // open();
 }
 
-void AppSetup::onOpen()
+void AppSetup::rebuildMenuSections()
 {
-    mclog::tagInfo(getAppInfo().name, "on open");
-
-    _key_manager = std::make_unique<input::KeyManager>();
-
-    // Reset state
-    _destroy_menu    = false;
-    _need_warm_reset = false;
-    _magic_count     = 0;
-
     _menu_sections = {
         {
             "Device",
@@ -54,6 +46,16 @@ void AppSetup::onOpen()
                  [&]() {
                      _destroy_menu = true;
                      _worker       = std::make_unique<ButtonWorker>();
+                 }},
+                {fmt::format("WiFi: {}", counter_service::isWifiEnabled() ? "On" : "Off"),
+                 [&]() {
+                     counter_service::setWifiEnabled(!counter_service::isWifiEnabled(), true);
+                     _rebuild_menu = true;
+                 }},
+                {fmt::format("MQTT: {}", counter_service::isMqttEnabled() ? "On" : "Off"),
+                 [&]() {
+                     counter_service::setMqttEnabled(!counter_service::isMqttEnabled(), true);
+                     _rebuild_menu = true;
                  }},
             },
         },
@@ -87,6 +89,21 @@ void AppSetup::onOpen()
             },
         },
     };
+}
+
+void AppSetup::onOpen()
+{
+    mclog::tagInfo(getAppInfo().name, "on open");
+
+    _key_manager = std::make_unique<input::KeyManager>();
+
+    // Reset state
+    _destroy_menu    = false;
+    _rebuild_menu    = false;
+    _need_warm_reset = false;
+    _magic_count     = 0;
+
+    rebuildMenuSections();
 
     LvglLockGuard lock;
 
@@ -106,6 +123,12 @@ void AppSetup::onRunning()
         _menu_page->update();
     }
 
+    if (_rebuild_menu) {
+        rebuildMenuSections();
+        _menu_page = std::make_unique<view::SelectMenuPage>(_menu_sections);
+        _rebuild_menu = false;
+    }
+
     if (_destroy_menu) {
         _menu_page.reset();
         _destroy_menu = false;
@@ -115,6 +138,7 @@ void AppSetup::onRunning()
         _worker->update();
         if (_worker->isDone()) {
             _worker.reset();
+            rebuildMenuSections();
             _menu_page = std::make_unique<view::SelectMenuPage>(_menu_sections);
         }
     }
