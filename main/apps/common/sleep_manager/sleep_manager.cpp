@@ -16,7 +16,6 @@
 #define USE_PMIC_SLEEP 0
 #endif
 
-
 namespace sleep_manager {
 namespace {
 
@@ -201,8 +200,26 @@ void disconnectNetworkForSleep()
     }
 }
 
+void enforceNetworkPauseWhileSleeping()
+{
+    if (!common::mqtt::isRecoveryPaused()) {
+        mclog::tagWarn(TAG, "MQTT resumed while sleeping; re-pausing");
+        common::mqtt::setRecoveryPaused(true);
+    }
+
+    if (!common::wifi::isRecoveryPaused()) {
+        mclog::tagWarn(TAG, "Wi-Fi resumed while sleeping; re-pausing");
+        common::wifi::setRecoveryPaused(true);
+    }
+}
+
 void restoreNetworkAfterWake()
 {
+    if (!s_sleeping) {
+        mclog::tagWarn(TAG, "restoreNetworkAfterWake() ignored because sleep manager is not sleeping");
+        return;
+    }
+
     mclog::tagInfo(TAG, "network wake: resume Wi-Fi recovery, start radio, then resume MQTT");
 
     // Resume Wi-Fi recovery before esp_wifi_start(). WIFI_EVENT_STA_START may be
@@ -265,7 +282,6 @@ void exitSleep()
         return;
     }
 
-    s_sleeping = false;
     s_sleep_orientation_count = 0;
     s_wake_orientation_count = 0;
     s_last_activity_ms = GetHAL().millis();
@@ -280,6 +296,8 @@ void exitSleep()
     GetHAL().setBackLightBrightness(s_saved_brightness > 0 ? s_saved_brightness : 80);
 
     restoreNetworkAfterWake();
+
+    s_sleeping = false;
     resetPmg0Sampler();
 }
 
@@ -322,14 +340,23 @@ void update()
     }
 
     if (s_sleeping) {
+        enforceNetworkPauseWhileSleeping();
+
         // While asleep, the app is not running visibly, so the sleep manager
         // may consume click events to wake the device.
         const bool button_activity = readButtonActivity();
         const bool touch_activity = readTouchActivity();
 
-        if (button_activity || touch_activity) {
+        if (button_activity) {
+            mclog::tagInfo(TAG, "button wake");
             exitSleep();
             return;
+        }
+
+        if (touch_activity) {
+            // Touch can report a false positive while the panel/display is asleep.
+            // Ignore touch while sleeping so it cannot resume Wi-Fi/MQTT early.
+            mclog::tagInfo(TAG, "touch ignored while sleeping");
         }
 
         if (now - s_sleep_entered_ms < POST_SLEEP_WAKE_LOCKOUT_MS) {
@@ -436,7 +463,6 @@ bool isSleeping()
 void markActivity()
 {
     if (s_sleeping) {
-        exitSleep();
         return;
     }
 

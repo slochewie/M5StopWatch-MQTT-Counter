@@ -306,6 +306,12 @@ void reconnectAfterDhcpStall()
     s_connecting = false;
     s_associated = false;
     esp_wifi_disconnect();
+
+    if (s_recovery_paused) {
+        ESP_LOGI(TAG, "DHCP stall reconnect skipped; recovery paused");
+        return;
+    }
+
     requestConnect("dhcp-stall");
 }
 
@@ -328,6 +334,11 @@ bool begin(const Config& config)
         return false;
     }
 
+    if (s_recovery_paused) {
+        ESP_LOGI(TAG, "Wi-Fi start skipped; recovery paused");
+        return false;
+    }
+
     if (!s_started) {
         ESP_LOGI(TAG, "Starting Wi-Fi STA: %s", s_config.ssid.c_str());
         const esp_err_t err = esp_wifi_start();
@@ -337,6 +348,11 @@ bool begin(const Config& config)
         }
     } else if (!s_connected) {
         recoverConnection();
+    }
+
+    if (s_recovery_paused) {
+        ESP_LOGI(TAG, "Wi-Fi wait skipped; recovery paused");
+        return false;
     }
 
     if (s_connected) {
@@ -352,6 +368,11 @@ bool begin(const Config& config)
     if (bits & WIFI_CONNECTED_BIT) {
         ESP_LOGI(TAG, "Wi-Fi connected");
         return true;
+    }
+
+    if (s_recovery_paused) {
+        ESP_LOGI(TAG, "Wi-Fi post-wait recovery skipped; recovery paused");
+        return false;
     }
 
     if (s_associated && !s_connected) {
@@ -377,6 +398,11 @@ void recoverConnection()
     }
 
     if (!s_started) {
+        if (s_recovery_paused) {
+            ESP_LOGI(TAG, "Wi-Fi start skipped during recovery; paused");
+            return;
+        }
+
         const esp_err_t err = esp_wifi_start();
         if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
             ESP_LOGW(TAG, "esp_wifi_start failed during recovery: %s", esp_err_to_name(err));
@@ -384,9 +410,19 @@ void recoverConnection()
         }
     }
 
+    if (s_recovery_paused) {
+        ESP_LOGI(TAG, "Wi-Fi reconnect skipped during recovery; paused");
+        return;
+    }
+
     if (!s_connected) {
         if (s_associated) {
             reconnectAfterDhcpStall();
+            return;
+        }
+
+        if (s_recovery_paused) {
+            ESP_LOGI(TAG, "Wi-Fi requestConnect skipped during recovery; paused");
             return;
         }
 

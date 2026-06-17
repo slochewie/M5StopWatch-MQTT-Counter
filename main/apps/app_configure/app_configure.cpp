@@ -11,12 +11,27 @@
 #include <mooncake_log.h>
 #include <smooth_lvgl.hpp>
 #include <apps/common/network/wifi_service.h>
+#include <apps/common/sleep_manager/sleep_manager.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <string>
 
 using namespace mooncake;
+
+namespace {
+
+void resumeWifiRecoveryIfAwake()
+{
+    if (sleep_manager::isSleeping()) {
+        mclog::tagInfo("Configure", "Wi-Fi recovery resume skipped; SleepManager is sleeping");
+        return;
+    }
+
+    common::wifi::setRecoveryPaused(false);
+}
+
+}  // namespace
 
 AppConfigure::AppConfigure()
 {
@@ -167,7 +182,7 @@ void AppConfigure::startConfigurePortal()
     if (created != pdPASS) {
         _portal_active = false;
         configure_ap::setRunning(false);
-        common::wifi::setRecoveryPaused(false);
+        resumeWifiRecoveryIfAwake();
         LvglLockGuard lock;
         refreshStatus("Failed to start portal task.");
     }
@@ -177,7 +192,7 @@ void AppConfigure::onPortalClosed()
 {
     _portal_active = false;
     configure_ap::setRunning(false);
-    common::wifi::setRecoveryPaused(false);
+    resumeWifiRecoveryIfAwake();
 
     if (!_is_open) {
         return;
@@ -192,7 +207,7 @@ void AppConfigure::portalTask(void* arg)
     auto* app = static_cast<AppConfigure*>(arg);
     if (app == nullptr) {
         configure_ap::setRunning(false);
-        common::wifi::setRecoveryPaused(false);
+        resumeWifiRecoveryIfAwake();
         vTaskDelete(nullptr);
         return;
     }

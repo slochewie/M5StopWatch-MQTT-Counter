@@ -4,6 +4,7 @@
 #include <hal/hal.h>
 #include <apps/common/network/mqtt_service.h>
 #include <apps/common/network/wifi_service.h>
+#include <apps/common/sleep_manager/sleep_manager.h>
 #include <hal/utils/settings/settings.h>
 
 #include <algorithm>
@@ -359,6 +360,10 @@ void recoverConnection()
 {
     if (!s_loaded) {
         loadRuntimeConfig();
+    }
+
+    if (sleep_manager::isSleeping()) {
+        return;
     }
 
     applyNetworkPauseState();
