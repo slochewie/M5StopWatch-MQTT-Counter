@@ -37,7 +37,7 @@ AppConfigure::AppConfigure()
 {
     setAppInfo().name = "Configure";
     // Reuse the setup icon for now. A dedicated configure icon can be added later.
-    setAppInfo().icon = (void*)&icon_setup;
+    setAppInfo().icon = (void*)&icon_configure;
 }
 
 void AppConfigure::onCreate()
