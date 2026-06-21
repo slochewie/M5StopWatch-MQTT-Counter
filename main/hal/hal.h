@@ -18,6 +18,7 @@
 #include <string_view>
 #include <array>
 #include <M5GFX.h>
+#include <esp_sleep.h>
 
 /**
  * @brief
@@ -104,6 +105,14 @@ class BootLogo {
 public:
     BootLogo()
     {
+        const esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
+        if (wake_cause == ESP_SLEEP_WAKEUP_EXT0 ||
+            wake_cause == ESP_SLEEP_WAKEUP_EXT1 ||
+            wake_cause == ESP_SLEEP_WAKEUP_TIMER ||
+            wake_cause == ESP_SLEEP_WAKEUP_GPIO) {
+            return;
+        }
+
         _panel = std::make_unique<uitk::lvgl_cpp::Container>(lv_screen_active());
         _panel->setSize(466, 466);
         _panel->setAlign(LV_ALIGN_CENTER);
@@ -116,7 +125,7 @@ public:
         _label_logo->setTextFont(&lv_font_montserrat_28);
         _label_logo->setTextColor(lv_color_hex(0xFFFFFF));
         _label_logo->align(LV_ALIGN_CENTER, 0, -14);
-        _label_logo->setText("StopWatch");
+        _label_logo->setText("NiteOwl.dev Counter");
 
         _label_msg = std::make_unique<uitk::lvgl_cpp::Label>(_panel->get());
         _label_msg->setTextFont(&lv_font_montserrat_16);
