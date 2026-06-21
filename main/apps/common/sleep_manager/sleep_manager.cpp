@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 #include "sleep_manager.h"
+
+#include "esp_sleep.h"
 #include <hal/hal.h>
 #include <apps/common/network/wifi_service.h>
 #include <apps/common/network/mqtt_service.h>
@@ -12,8 +14,23 @@
 #include <esp_wifi.h>
 #include <esp_err.h>
 
+#include <driver/gpio.h>
+#include <driver/rtc_io.h>
+
 #ifndef USE_PMIC_SLEEP
 #define USE_PMIC_SLEEP 0
+#endif
+
+#ifndef SLEEP_MANAGER_TOUCH_WAKE_GPIO
+#define SLEEP_MANAGER_TOUCH_WAKE_GPIO 13
+#endif
+
+#ifndef SLEEP_MANAGER_TOUCH_WAKE_LEVEL
+#define SLEEP_MANAGER_TOUCH_WAKE_LEVEL 0
+#endif
+
+#ifndef SLEEP_MANAGER_KEEP_TIMER_WAKE
+#define SLEEP_MANAGER_KEEP_TIMER_WAKE 0
 #endif
 
 namespace sleep_manager {
@@ -222,9 +239,6 @@ void restoreNetworkAfterWake()
 
     mclog::tagInfo(TAG, "network wake: resume Wi-Fi recovery, start radio, then resume MQTT");
 
-    // Resume Wi-Fi recovery before esp_wifi_start(). WIFI_EVENT_STA_START may be
-    // delivered synchronously/quickly after start, and the Wi-Fi service should
-    // be allowed to auto-connect from that event instead of skipping it.
     common::wifi::setRecoveryPaused(false);
 
     const esp_err_t start_err = esp_wifi_start();
@@ -234,8 +248,6 @@ void restoreNetworkAfterWake()
         mclog::tagWarn(TAG, "esp_wifi_start failed: {}", esp_err_to_name(start_err));
     }
 
-    // MQTT recovery is safe to resume after Wi-Fi is started. CounterService's
-    // periodic recovery tick will start MQTT once Wi-Fi has an IP again.
     common::mqtt::setRecoveryPaused(false);
 }
 
@@ -245,35 +257,33 @@ void enterSleep()
         return;
     }
 
-    s_saved_brightness = GetHAL().getBackLightBrightness();
-    if (s_saved_brightness <= 0) {
-        s_saved_brightness = 80;
-    }
+    mclog::tagInfo(TAG, "ESP32 deep sleep enter");
 
-    s_sleeping = true;
-    s_sleep_entered_ms = GetHAL().millis();
-    s_wake_orientation_count = 0;
-    resetPmg0Sampler();
-
-    mclog::tagInfo(TAG, "display sleep enter");
-    disconnectNetworkForSleep();
-    GetHAL().pmicEnterAppSleep();
-
-    // M5GFX/LovyanGFX supported display sleep:
-    // LGFXBase::sleep() calls panel->setBrightness(0) and panel->setSleep(true).
-    // Keep the explicit backlight-off call as a conservative fallback.
-    GetHAL().getDisplay().sleep();
     GetHAL().setBackLightBrightness(0);
+    GetHAL().getDisplay().sleep();
 
-#if USE_PMIC_SLEEP
-    mclog::tagInfo(TAG, "PMIC sleep experiment enabled: requesting M5PM1 shutdown");
-    GetHAL().delay(150);
-    if (GetHAL().pmicShutdownForSleep()) {
-        return;
-    }
+    disconnectNetworkForSleep();
 
-    mclog::tagWarn(TAG, "PMIC sleep shutdown failed; falling back to software sleep loop");
+    // L2 target: ESP32-S3 native deep sleep, wake from CST820 touch interrupt.
+    // Schematic: G13_TP_INT is ESP32 GPIO13. TP_INT is normally pulled high and
+    // asserts low, so EXT0 wakes on level 0.
+    mclog::tagInfo(TAG,
+                   "deep sleep wake: EXT0 touch GPIO{} level={}",
+                   SLEEP_MANAGER_TOUCH_WAKE_GPIO,
+                   SLEEP_MANAGER_TOUCH_WAKE_LEVEL);
+
+    const gpio_num_t touch_wake_gpio = static_cast<gpio_num_t>(SLEEP_MANAGER_TOUCH_WAKE_GPIO);
+    ESP_ERROR_CHECK(rtc_gpio_pullup_en(touch_wake_gpio));
+    ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(touch_wake_gpio));
+    ESP_ERROR_CHECK(esp_sleep_enable_ext0_wakeup(touch_wake_gpio,
+                                                 SLEEP_MANAGER_TOUCH_WAKE_LEVEL));
+
+#if SLEEP_MANAGER_KEEP_TIMER_WAKE
+    mclog::tagWarn(TAG, "deep sleep wake: timer safety net enabled for 10 seconds");
+    ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(10ULL * 1000000ULL));
 #endif
+
+    esp_deep_sleep_start();
 }
 
 void exitSleep()
@@ -289,9 +299,6 @@ void exitSleep()
     mclog::tagInfo(TAG, "display sleep wake");
     GetHAL().pmicExitAppSleep();
 
-    // M5GFX/LovyanGFX supported display wake:
-    // LGFXBase::wakeup() calls panel->setSleep(false) and restores panel brightness.
-    // Then restore the HAL/backlight setting used by the app UI.
     GetHAL().getDisplay().wakeup();
     GetHAL().setBackLightBrightness(s_saved_brightness > 0 ? s_saved_brightness : 80);
 
@@ -319,6 +326,31 @@ void begin()
     }
 
     s_initialized = true;
+    const esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
+    switch (wake_cause) {
+        case ESP_SLEEP_WAKEUP_TIMER:
+            mclog::tagInfo(TAG, "ESP32 wake cause: timer");
+            break;
+        case ESP_SLEEP_WAKEUP_EXT0:
+            mclog::tagInfo(TAG,
+                           "ESP32 wake cause: EXT0 touch GPIO{}",
+                           SLEEP_MANAGER_TOUCH_WAKE_GPIO);
+            break;
+        case ESP_SLEEP_WAKEUP_EXT1:
+            mclog::tagInfo(TAG, "ESP32 wake cause: EXT1");
+            break;
+        case ESP_SLEEP_WAKEUP_GPIO:
+            mclog::tagInfo(TAG, "ESP32 wake cause: GPIO");
+            break;
+        case ESP_SLEEP_WAKEUP_UNDEFINED:
+            mclog::tagInfo(TAG, "ESP32 wake cause: normal boot/reset");
+            break;
+        default:
+            mclog::tagInfo(TAG,
+                           "ESP32 wake cause: {}",
+                           static_cast<int>(wake_cause));
+            break;
+    }
     resetIdleState();
     mclog::tagInfo(TAG, "begin");
 }
@@ -342,8 +374,6 @@ void update()
     if (s_sleeping) {
         enforceNetworkPauseWhileSleeping();
 
-        // While asleep, the app is not running visibly, so the sleep manager
-        // may consume click events to wake the device.
         const bool button_activity = readButtonActivity();
         const bool touch_activity = readTouchActivity();
 
@@ -354,8 +384,6 @@ void update()
         }
 
         if (touch_activity) {
-            // Touch can report a false positive while the panel/display is asleep.
-            // Ignore touch while sleeping so it cannot resume Wi-Fi/MQTT early.
             mclog::tagInfo(TAG, "touch ignored while sleeping");
         }
 
@@ -365,11 +393,6 @@ void update()
         }
 
         if (samplePmg0IfDue("sleep-loop")) {
-            // BMI270 any-motion is intentionally broad.  When the StopWatch is
-            // hanging from a lanyard, walking can trip the same motion
-            // interrupt.  Treat PMG0/BMI270 as only a wake candidate, then
-            // require the measured handheld orientation before turning the
-            // display/network back on.
             armMotionWakeCandidate("sleep-loop");
         }
 
@@ -404,16 +427,11 @@ void update()
         return;
     }
 
-    // While awake, do not call wasClicked() / wasPressed() here.
-    // Those edge events belong to Mooncake apps such as KeyManager.
-    // Touch is safe to use as an idle reset.
     if (readTouchActivity()) {
         markActivity();
         return;
     }
 
-    // Non-consuming button state check only. This catches active button use
-    // without stealing click events from the current app.
     if (GetHAL().btnA.isPressed() || GetHAL().btnB.isPressed() || GetHAL().btnPwr.isPressed()) {
         markActivity();
         return;
@@ -424,7 +442,19 @@ void update()
     }
 
     if (sampleImuIfDue()) {
-        if (isHangingOrientation()) {
+        const bool hanging = isHangingOrientation();
+
+        static uint32_t s_last_sleep_diag_ms = 0;
+        if (now - s_last_sleep_diag_ms >= 2000) {
+            s_last_sleep_diag_ms = now;
+            mclog::tagInfo(TAG,
+                           "sleep check: idle={} hanging={} confirm={}",
+                           now - s_last_activity_ms,
+                           hanging ? 1 : 0,
+                           static_cast<int>(s_sleep_orientation_count));
+        }
+
+        if (hanging) {
             if (s_sleep_orientation_count < SLEEP_CONFIRM_SAMPLES) {
                 ++s_sleep_orientation_count;
             }

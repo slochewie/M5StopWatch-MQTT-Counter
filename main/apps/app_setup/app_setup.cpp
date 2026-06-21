@@ -28,6 +28,8 @@ void AppSetup::onCreate()
 
 void AppSetup::rebuildMenuSections()
 {
+    const auto startup_app = counter_service::getStartupApp();
+
     _menu_sections = {
         {
             "Device",
@@ -55,6 +57,21 @@ void AppSetup::rebuildMenuSections()
                 {fmt::format("MQTT: {}", counter_service::isMqttEnabled() ? "On" : "Off"),
                  [&]() {
                      counter_service::setMqttEnabled(!counter_service::isMqttEnabled(), true);
+                     _rebuild_menu = true;
+                 }},
+            },
+        },
+        {
+            "Startup App",
+            {
+                {fmt::format("{} Counter", startup_app == counter_service::StartupApp::Counter ? "◉" : "○"),
+                 [&]() {
+                     counter_service::setStartupApp(counter_service::StartupApp::Counter, true);
+                     _rebuild_menu = true;
+                 }},
+                {fmt::format("{} Launcher", startup_app == counter_service::StartupApp::Launcher ? "◉" : "○"),
+                 [&]() {
+                     counter_service::setStartupApp(counter_service::StartupApp::Launcher, true);
                      _rebuild_menu = true;
                  }},
             },

@@ -8,6 +8,7 @@
 #include <hal/hal.h>
 #include <mooncake.h>
 #include <mooncake_log.h>
+#include <counter_service.h>
 #include <cstdint>
 
 using namespace mooncake;
@@ -15,7 +16,6 @@ using namespace mooncake;
 void AppLauncher::onLauncherCreate()
 {
     mclog::tagInfo(getAppInfo().name, "on create");
-
     open();
 }
 
@@ -49,6 +49,14 @@ void AppLauncher::onLauncherOpen()
 
 void AppLauncher::onLauncherRunning()
 {
+    if (!_startup_counter_opened &&
+        counter_service::getStartupApp() == counter_service::StartupApp::Counter) {
+        _startup_counter_opened = true;
+        mclog::tagInfo(getAppInfo().name, "startup app is Counter; opening Counter");
+        openApp(1);
+        return;
+    }
+
     LvglLockGuard lock;
 
     uint32_t now = GetHAL().millis();

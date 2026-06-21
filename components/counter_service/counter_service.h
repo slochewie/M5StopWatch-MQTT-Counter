@@ -4,6 +4,11 @@
 
 namespace counter_service {
 
+enum class StartupApp : uint8_t {
+    Launcher = 0,
+    Counter  = 1,
+};
+
 void begin();
 void recoverConnection();
 bool isStarted();
@@ -22,5 +27,9 @@ bool isWifiEnabled();
 bool isMqttEnabled();
 void setWifiEnabled(bool enabled, bool saveToSettings = true);
 void setMqttEnabled(bool enabled, bool saveToSettings = true);
+
+StartupApp getStartupApp();
+void setStartupApp(StartupApp app, bool saveToSettings = true);
+const char* startupAppName();
 
 }  // namespace counter_service

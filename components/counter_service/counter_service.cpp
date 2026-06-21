@@ -28,6 +28,7 @@ static constexpr const char* LOCAL_TIMEZONE = "PST8PDT,M3.2.0,M11.1.0";
 static constexpr const char* SETTINGS_NS = "counter_service";
 static constexpr const char* WIFI_ENABLED_KEY = "wifi_enabled";
 static constexpr const char* MQTT_ENABLED_KEY = "mqtt_enabled";
+static constexpr const char* STARTUP_COUNTER_KEY = "startup_counter";
 static constexpr time_t MIN_VALID_EPOCH = 1700000000;  // 2023-11-14 sanity floor.
 static constexpr uint32_t BATTERY_SKIP_LOG_INTERVAL_MS = 30000;
 static constexpr uint32_t BATTERY_PUBLISH_HEARTBEAT_MS = 300000;
@@ -41,6 +42,7 @@ bool s_started = false;
 bool s_has_latest = false;
 bool s_wifi_enabled = true;
 bool s_mqtt_enabled = true;
+StartupApp s_startup_app = StartupApp::Launcher;
 int32_t s_latest_value = 0;
 portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 uint32_t s_last_battery_skip_log_ms = 0;
@@ -61,19 +63,21 @@ void applyNetworkPauseState()
     }
 }
 
-void loadNetworkToggles()
+void loadSettings()
 {
     Settings settings(SETTINGS_NS, false);
     s_wifi_enabled = settings.GetBool(WIFI_ENABLED_KEY, true);
     s_mqtt_enabled = settings.GetBool(MQTT_ENABLED_KEY, true);
+    s_startup_app = settings.GetBool(STARTUP_COUNTER_KEY, false) ? StartupApp::Counter : StartupApp::Launcher;
     applyNetworkPauseState();
 }
 
-void saveNetworkToggles()
+void saveSettings()
 {
     Settings settings(SETTINGS_NS, true);
     settings.SetBool(WIFI_ENABLED_KEY, s_wifi_enabled);
     settings.SetBool(MQTT_ENABLED_KEY, s_mqtt_enabled);
+    settings.SetBool(STARTUP_COUNTER_KEY, s_startup_app == StartupApp::Counter);
 }
 
 std::string deriveBatteryTopic(const std::string& counter_topic)
@@ -97,7 +101,7 @@ void loadRuntimeConfig()
 {
     applyLocalTimezone();
     s_config = device_config::load();
-    loadNetworkToggles();
+    loadSettings();
 
     auto defaults = device_config::defaults();
     if (s_config.device_name.empty()) {
@@ -114,14 +118,15 @@ void loadRuntimeConfig()
     s_battery_topic = deriveBatteryTopic(s_counter_topic);
     s_loaded = true;
 
-    ESP_LOGI(TAG, "Loaded config: device=%s, broker=%s, topic=%s, battery=%s, ssid=%s, wifi=%s, mqtt=%s",
+    ESP_LOGI(TAG, "Loaded config: device=%s, broker=%s, topic=%s, battery=%s, ssid=%s, wifi=%s, mqtt=%s, startup=%s",
              s_config.device_name.c_str(),
              s_config.mqtt_uri.c_str(),
              s_counter_topic.c_str(),
              s_battery_topic.c_str(),
              s_config.wifi_ssid.empty() ? "<empty>" : s_config.wifi_ssid.c_str(),
              s_wifi_enabled ? "on" : "off",
-             s_mqtt_enabled ? "on" : "off");
+             s_mqtt_enabled ? "on" : "off",
+             s_startup_app == StartupApp::Counter ? "counter" : "launcher");
 }
 
 void setLatestValue(int32_t value)
@@ -583,7 +588,7 @@ void setWifiEnabled(bool enabled, bool saveToSettings)
     }
 
     if (saveToSettings) {
-        saveNetworkToggles();
+        saveSettings();
     }
 
     applyNetworkPauseState();
@@ -610,7 +615,7 @@ void setMqttEnabled(bool enabled, bool saveToSettings)
     }
 
     if (saveToSettings) {
-        saveNetworkToggles();
+        saveSettings();
     }
 
     applyNetworkPauseState();
@@ -619,6 +624,41 @@ void setMqttEnabled(bool enabled, bool saveToSettings)
     if (s_wifi_enabled && s_mqtt_enabled) {
         (void)ensureMqttStarted();
     }
+}
+
+StartupApp getStartupApp()
+{
+    if (!s_loaded) {
+        loadRuntimeConfig();
+    }
+    return s_startup_app;
+}
+
+void setStartupApp(StartupApp app, bool saveToSettings)
+{
+    if (!s_loaded) {
+        loadRuntimeConfig();
+    }
+
+    if (s_startup_app == app) {
+        return;
+    }
+
+    s_startup_app = app;
+
+    if (saveToSettings) {
+        saveSettings();
+    }
+
+    ESP_LOGI(TAG, "Startup app setting changed: %s", startupAppName());
+}
+
+const char* startupAppName()
+{
+    if (!s_loaded) {
+        loadRuntimeConfig();
+    }
+    return s_startup_app == StartupApp::Counter ? "Counter" : "Launcher";
 }
 
 }  // namespace counter_service
