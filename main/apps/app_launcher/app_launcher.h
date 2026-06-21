@@ -26,6 +26,7 @@ private:
     uint32_t _last_charge_check_tick = 0;
     bool _was_battery_charging       = false;
     bool _should_play_boot_sfx       = true;
+    bool _startup_counter_opened     = false;
 
     void create_launcher_view();
     void show_guide_page();
