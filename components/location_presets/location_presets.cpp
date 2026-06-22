@@ -6,35 +6,21 @@
 #include <nvs.h>
 #include <nvs_flash.h>
 
-#include <cstdio>
-
 namespace location_presets {
+
+extern const Preset* generatedPresets(size_t* count) __attribute__((weak));
+
 namespace {
 
 constexpr const char* TAG = "LocationPresets";
-constexpr const char* PRESET_PARTITION = "preset_nvs";
-constexpr const char* PRESET_NS = "location_presets";
 constexpr const char* STATE_NS = "location_state";
 constexpr const char* SELECTED_KEY = "selected";
 
-struct LocationMeta {
-    const char* id;
-    const char* name;
-};
-
-constexpr LocationMeta kLocations[] = {
-    {"home", "Home"},
-    {"mccarthys", "McCarthy's"},
-    {"library", "Library"},
-    {"frog_peach", "Frog & Peach"},
-    {"bulls", "Bull's"},
-};
-
-bool ensureDefaultNvsReady()
+bool ensureNvsReady()
 {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "Default NVS init requested erase: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "NVS init requested erase: %s", esp_err_to_name(err));
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }
@@ -45,56 +31,20 @@ bool ensureDefaultNvsReady()
     return true;
 }
 
-bool ensurePresetNvsReady()
+const Preset* presets(size_t* out_count)
 {
-    esp_err_t err = nvs_flash_init_partition(PRESET_PARTITION);
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "Preset NVS init requested erase: %s", esp_err_to_name(err));
-        ESP_ERROR_CHECK(nvs_flash_erase_partition(PRESET_PARTITION));
-        err = nvs_flash_init_partition(PRESET_PARTITION);
+    if (out_count != nullptr) {
+        *out_count = 0;
     }
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "preset_nvs unavailable: %s", esp_err_to_name(err));
-        return false;
+    if (generatedPresets == nullptr) {
+        return nullptr;
     }
-    return true;
-}
-
-std::string readString(nvs_handle_t handle, const char* key)
-{
-    size_t length = 0;
-    esp_err_t err = nvs_get_str(handle, key, nullptr, &length);
-    if (err == ESP_ERR_NVS_NOT_FOUND || length == 0) {
-        return {};
-    }
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to read %s: %s", key, esp_err_to_name(err));
-        return {};
-    }
-
-    std::string value(length, '\0');
-    err = nvs_get_str(handle, key, value.data(), &length);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to read %s value: %s", key, esp_err_to_name(err));
-        return {};
-    }
-    if (!value.empty() && value.back() == '\0') {
-        value.pop_back();
-    }
-    return value;
-}
-
-bool readPresetValue(nvs_handle_t handle, const char* id, const char* suffix, std::string& value)
-{
-    char key[32];
-    std::snprintf(key, sizeof(key), "%s_%s", id, suffix);
-    value = readString(handle, key);
-    return !value.empty();
+    return generatedPresets(out_count);
 }
 
 void saveSelectedIndex(int index)
 {
-    if (!ensureDefaultNvsReady()) {
+    if (!ensureNvsReady()) {
         return;
     }
 
@@ -114,20 +64,24 @@ void saveSelectedIndex(int index)
 
 size_t count()
 {
-    return sizeof(kLocations) / sizeof(kLocations[0]);
+    size_t preset_count = 0;
+    (void)presets(&preset_count);
+    return preset_count;
 }
 
-const char* nameAt(size_t index)
+const Preset* at(size_t index)
 {
-    if (index >= count()) {
-        return "";
+    size_t preset_count = 0;
+    const Preset* preset_list = presets(&preset_count);
+    if (preset_list == nullptr || index >= preset_count) {
+        return nullptr;
     }
-    return kLocations[index].name;
+    return &preset_list[index];
 }
 
 int selectedIndex()
 {
-    if (!ensureDefaultNvsReady()) {
+    if (!ensureNvsReady()) {
         return -1;
     }
 
@@ -150,60 +104,36 @@ int selectedIndex()
 const char* selectedName()
 {
     const int index = selectedIndex();
-    return index < 0 ? "Manual" : nameAt(static_cast<size_t>(index));
-}
-
-bool load(size_t index, Preset& preset)
-{
-    if (index >= count()) {
-        return false;
-    }
-    if (!ensurePresetNvsReady()) {
-        return false;
-    }
-
-    nvs_handle_t handle = 0;
-    esp_err_t err = nvs_open_from_partition(PRESET_PARTITION, PRESET_NS, NVS_READONLY, &handle);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "nvs_open_from_partition failed: %s", esp_err_to_name(err));
-        return false;
-    }
-
-    preset.id = kLocations[index].id;
-    preset.name = kLocations[index].name;
-
-    bool ok = true;
-    ok = readPresetValue(handle, preset.id, "wifi_ssid", preset.wifi_ssid) && ok;
-    ok = readPresetValue(handle, preset.id, "wifi_pass", preset.wifi_password) && ok;
-    ok = readPresetValue(handle, preset.id, "mqtt_uri", preset.mqtt_uri) && ok;
-
-    nvs_close(handle);
-
-    if (!ok) {
-        ESP_LOGW(TAG, "Location preset %s is incomplete", preset.name);
-    }
-    return ok;
+    const Preset* preset = index < 0 ? nullptr : at(static_cast<size_t>(index));
+    return preset == nullptr ? "Manual" : preset->name;
 }
 
 bool apply(size_t index)
 {
-    Preset preset;
-    if (!load(index, preset)) {
+    const Preset* preset = at(index);
+    if (preset == nullptr) {
+        ESP_LOGW(TAG, "Location preset %u unavailable", static_cast<unsigned>(index));
+        return false;
+    }
+
+    if (preset->wifi_ssid == nullptr || preset->wifi_ssid[0] == '\0' ||
+        preset->mqtt_uri == nullptr || preset->mqtt_uri[0] == '\0') {
+        ESP_LOGW(TAG, "Location preset %s is incomplete", preset->name == nullptr ? "<unnamed>" : preset->name);
         return false;
     }
 
     device_config::Config config = device_config::load();
-    config.wifi_ssid = preset.wifi_ssid;
-    config.wifi_password = preset.wifi_password;
-    config.mqtt_uri = preset.mqtt_uri;
+    config.wifi_ssid = preset->wifi_ssid;
+    config.wifi_password = preset->wifi_password == nullptr ? "" : preset->wifi_password;
+    config.mqtt_uri = preset->mqtt_uri;
 
     if (!device_config::save(config)) {
-        ESP_LOGE(TAG, "Failed to save active config for %s", preset.name);
+        ESP_LOGE(TAG, "Failed to save active config for %s", preset->name);
         return false;
     }
 
     saveSelectedIndex(static_cast<int>(index));
-    ESP_LOGI(TAG, "Applied location preset: %s", preset.name);
+    ESP_LOGI(TAG, "Applied location preset: %s", preset->name);
     return true;
 }
 
