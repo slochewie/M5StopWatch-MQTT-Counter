@@ -158,6 +158,25 @@ void AppCounter::onRunning()
         return;
     }
 
+    // During global SleepManager standby/L2, the app should not keep doing
+    // normal foreground work. This avoids MQTT sync attempts, status/battery
+    // refreshes, key polling, and UI redraw timers after the 10-second
+    // display/network standby has already stopped the display and radio.
+    //
+    // If a count publish was already pending before standby, keep retrying it;
+    // otherwise SleepManager owns touch/button wake and network stays deferred.
+    if (sleep_manager::isSleeping()) {
+        if (_publish_pending) {
+            if (s_network_recover_pending &&
+                static_cast<int32_t>(now - s_network_recover_after_ms) >= 0) {
+                s_network_recover_pending = false;
+                counter_service::recoverConnection();
+            }
+            publishPendingValueIfNeeded();
+        }
+        return;
+    }
+
     if (s_network_recover_pending &&
         static_cast<int32_t>(now - s_network_recover_after_ms) >= 0) {
         s_network_recover_pending = false;
