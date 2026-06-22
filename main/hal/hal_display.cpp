@@ -328,8 +328,6 @@ static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px
 
 static void lvgl_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 {
-    M5GFX &gfx = *(M5GFX *)lv_indev_get_driver_data(indev);
-
     auto tp = GetHAL().getTouchPoint();
     if (tp.num == 0) {
         data->state = LV_INDEV_STATE_REL;
@@ -372,7 +370,13 @@ void Hal::lvgl_init()
     lv_indev_set_display(lvTouchpad, disp);
 
     xGuiSemaphore                                     = xSemaphoreCreateMutex();
-    const esp_timer_create_args_t periodic_timer_args = {.callback = &lvgl_tick_timer, .name = "lvgl_tick_timer"};
+    const esp_timer_create_args_t periodic_timer_args = {
+        .callback = &lvgl_tick_timer,
+        .arg = nullptr,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "lvgl_tick_timer",
+        .skip_unhandled_events = false,
+    };
     esp_timer_handle_t periodic_timer;
     ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, 10 * 1000));
