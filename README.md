@@ -6,23 +6,29 @@ MQTT-synchronized capacity counter firmware for the M5Stack StopWatch.
 
 ## Overview
 
-M5StopWatch MQTT Counter turns the M5Stack StopWatch into a battery-powered capacity counter that stays synchronized with other StopWatch devices, web dashboards, Node-RED, and other MQTT clients through a central MQTT broker.
+M5StopWatch MQTT Counter turns the M5Stack StopWatch into a battery-powered venue capacity counter. The firmware adds a dedicated **Counter** app to the StopWatch launcher, displays the shared count on the round 466 × 466 screen, and synchronizes count changes over MQTT.
 
-The firmware is based on the original M5Stack StopWatch User Demo, but the launcher now includes a dedicated **Counter** app with MQTT state synchronization, battery publishing, a round LVGL user interface, and safer long-press reset behavior.
+The project is built with **ESP-IDF** and is based on the original M5Stack StopWatch User Demo firmware. The current firmware focuses on reliable physical-button counting, MQTT synchronization, long-press reset protection, battery publishing, and power-management work for hanging/lanyard use.
 
 ## Current Features
 
-- MQTT-synchronized counter state
-- Multiple StopWatch devices can share one counter value
-- Increment and decrement using the physical StopWatch buttons
-- Touchscreen reset button with long-press protection
-- Counter value pulled from MQTT before local increment/decrement
-- Count is clamped at zero when decrementing
-- Battery percentage publishing
-- MQTT status and topic shown on the Counter app screen
-- Round LVGL interface for the 466 × 466 StopWatch display
-- Counter launcher icon using the mechanical tally-counter asset
-- Initial display/light-sleep and IMU wake infrastructure under development
+- Counter app integrated into the StopWatch launcher.
+- Mechanical tally-counter launcher icon.
+- Round LVGL Counter app UI with true-black background.
+- Arc-top clock/status UI shared with the launcher style.
+- Physical button controls:
+  - `KEYB` / Go Next increments.
+  - `KEYA` / Go Previous decrements.
+- Touchscreen **HOLD RESET** button with approximately 2-second long-press protection.
+- Count clamped at zero.
+- Last count persisted to NVS.
+- MQTT state synchronization through the configured counter state topic.
+- State publish payload includes the device name.
+- Incoming state accepts a plain integer or JSON with a `value` field.
+- Battery percentage publishing on a derived battery topic.
+- Settings app controls for Wi-Fi, MQTT, appliance mode, and startup app.
+- Optional startup directly into the Counter app.
+- 10-second display/network standby and 30-second ESP32-S3 deep-sleep path under active testing.
 
 ## User Interface
 
@@ -40,7 +46,7 @@ The Counter app shows the current count, a long-press reset button, battery leve
 
 ### Reset Protection
 
-The touchscreen reset button is intentionally labeled **HOLD RESET**. A reset is only requested after the reset button is held for approximately two seconds. This prevents accidental resets from a quick tap.
+The touchscreen reset button is intentionally labeled **HOLD RESET**. A reset is only requested after the reset button is held for approximately two seconds.
 
 ![Reset screen](docs/screenshots/reset.svg)
 
@@ -64,47 +70,72 @@ Target device:
 | Touchscreen **HOLD RESET** button | Reset after long press |
 | Home gesture/button event | Return to launcher |
 
-## MQTT Topics
+## MQTT Defaults
 
-Default topic family:
+Default device/runtime configuration is defined in `components/device_config`.
 
-```text
-counters/capacity
+| Setting | Default |
+| --- | --- |
+| Device name | `Capacity-01` |
+| MQTT broker URI | `mqtt://smbhub.local:1883` |
+| Counter state topic | `counters/capacity/state` |
+| Battery topic | Derived from state topic: `counters/capacity/battery` |
+| Time sync topic | `system/time/epoch` |
+
+### State Payloads
+
+The firmware publishes retained QoS 1 JSON state to the configured counter topic:
+
+```json
+{"value":30,"updated_by":"Capacity-01"}
 ```
 
-| Topic | Direction | Purpose |
-| --- | --- | --- |
-| `counters/capacity/state` | Subscribe/publish | Shared authoritative counter value |
-| `counters/capacity/increment` | Publish/consume by Node-RED flow | Increment command, if using command topics |
-| `counters/capacity/decrement` | Publish/consume by Node-RED flow | Decrement command, if using command topics |
-| `counters/capacity/reset` | Publish/consume by Node-RED flow | Reset command, if using command topics |
-| `counters/<device>/battery` | Publish | Device battery percentage |
+Incoming counter state may be either a plain integer or JSON containing a `value` field.
 
-The Counter app displays the active state topic on screen and uses the MQTT service to synchronize the latest value before applying local button changes.
+### Battery Payloads
+
+Battery publishes to the derived battery topic, for example:
+
+```text
+counters/capacity/battery
+```
+
+Payload:
+
+```json
+{"battery":84,"device":"Capacity-01"}
+```
 
 ## System Architecture
 
 ```text
-                    ┌───────────────┐
-                    │   Node-RED    │
-                    │ Authoritative │
-                    │ Counter State │
-                    └───────┬───────┘
-                            │
-                      MQTT Broker
-                            │
-         ┌──────────────────┼──────────────────┐
-         │                  │                  │
-         ▼                  ▼                  ▼
-  StopWatch #1      StopWatch #2       Web Dashboard
-         │                  │                  │
-         ▼                  ▼                  ▼
-   Battery topic      Battery topic     Other MQTT clients
+      ┌─────────────────┐
+      │ StopWatch #1    │
+      │ Counter app     │
+      └───────┬─────────┘
+              │ MQTT state/battery
+              ▼
+      ┌─────────────────┐
+      │ MQTT Broker     │
+      │ Mosquitto       │
+      └───────┬─────────┘
+              │
+              ▼
+      ┌─────────────────┐
+      │ Node-RED        │
+      │ authoritative   │
+      │ counter logic   │
+      └───────┬─────────┘
+              │ retained state
+      ┌───────┴──────────────┐
+      ▼                      ▼
+StopWatch #2           Web dashboard /
+Other clients          other MQTT clients
 ```
 
-Node-RED remains the recommended authoritative counter-state owner. StopWatch devices subscribe to the shared state topic and publish updates when local button or reset actions occur.
+Node-RED remains the recommended authoritative owner of the shared counter value. StopWatch devices subscribe to the state topic and publish updated values when local button or reset actions occur.
 
-See [`docs/architecture.md`](docs/architecture.md) for more detail.
+See [`docs/architecture.md`](docs/architecture.md) and [`docs/mqtt.md`](docs/mqtt.md) for more detail.
 
 ## Screenshots
 
@@ -181,7 +212,7 @@ Flash and monitor:
 idf.py flash monitor
 ```
 
-Current build output may still use the inherited application binary name `StopWatch-UserDemo.bin` until the ESP-IDF project metadata is renamed.
+Current build output still uses the inherited ESP-IDF project name `StopWatch-UserDemo` because the root `CMakeLists.txt` still declares `project(StopWatch-UserDemo)`.
 
 ## Repository Structure
 
@@ -190,12 +221,19 @@ M5StopWatch-MQTT-Counter/
 ├── main/
 │   ├── apps/
 │   │   ├── app_counter/
-│   │   └── app_launcher/
+│   │   ├── app_launcher/
+│   │   ├── app_setup/
+│   │   └── common/
 │   └── assets/
 │       └── images/
 ├── components/
+│   ├── counter_service/
+│   └── device_config/
 ├── docs/
 │   ├── architecture.md
+│   ├── building.md
+│   ├── mqtt.md
+│   ├── power-management.md
 │   └── screenshots/
 ├── CMakeLists.txt
 ├── sdkconfig.defaults
@@ -204,14 +242,18 @@ M5StopWatch-MQTT-Counter/
 
 ## Power Management Status
 
-Power management is still active development.
+Power management is active development but no longer purely theoretical.
 
-Current implementation notes:
+Current behavior in the system sleep manager:
 
-- Display/light-sleep helper code exists in the Counter app.
-- IMU-orientation wake sampling exists for future sleep behavior.
-- App-owned automatic display sleep timeout is currently disabled while the system sleep manager work is being sorted out.
-- Wake recovery schedules MQTT/network recovery after display sleep wake.
+- 10 seconds idle while hanging: display/network standby.
+- 30 seconds idle while hanging: ESP32-S3 native deep sleep target.
+- Display standby turns off the backlight, sleeps the display, and pauses Wi-Fi/MQTT recovery.
+- Standby wakes from touch or physical button activity.
+- Deep sleep is configured for touch wake on GPIO13 / `G13_TP_INT`.
+- Network recovery is deferred until needed after wake.
+
+See [`docs/power-management.md`](docs/power-management.md) for details and known limitations.
 
 ## Related Projects
 
@@ -236,5 +278,6 @@ Recent focus:
 - MQTT synchronization reliability
 - Long-press reset safety
 - Battery publishing
+- Settings controls for Wi-Fi/MQTT/startup behavior
 - Round-display UI documentation
-- Sleep/wake architecture research
+- Sleep/wake architecture testing
