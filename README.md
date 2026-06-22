@@ -2,7 +2,7 @@
 
 MQTT-synchronized capacity counter firmware for the M5Stack StopWatch.
 
-![Counter app launcher](docs/screenshots/launcher-counter-selected.png)
+![Counter app launcher](docs/screenshots/launcher-icon-counter.png)
 
 ## Overview
 
@@ -36,7 +36,7 @@ The project is built with **ESP-IDF** and is based on the original M5Stack StopW
 
 The Counter app appears in the StopWatch launcher carousel with the mechanical tally-counter icon.
 
-![Counter selected in launcher](docs/screenshots/launcher-counter-selected.png)
+![Counter selected in launcher](docs/screenshots/launcher-icon-counter.png)
 
 ### Counter App
 
