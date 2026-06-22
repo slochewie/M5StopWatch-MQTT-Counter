@@ -1,0 +1,17 @@
+key,type,encoding,value
+location_presets,namespace,,
+home_wifi_ssid,data,string,HomeWiFi
+home_wifi_pass,data,string,HomePassword
+home_mqtt_uri,data,string,mqtt://home-broker.local:1883
+mccarthys_wifi_ssid,data,string,McCarthysWiFi
+mccarthys_wifi_pass,data,string,McCarthysPassword
+mccarthys_mqtt_uri,data,string,mqtt://mccarthys-broker.local:1883
+library_wifi_ssid,data,string,LibraryWiFi
+library_wifi_pass,data,string,LibraryPassword
+library_mqtt_uri,data,string,mqtt://library-broker.local:1883
+frog_peach_wifi_ssid,data,string,FrogPeachWiFi
+frog_peach_wifi_pass,data,string,FrogPeachPassword
+frog_peach_mqtt_uri,data,string,mqtt://frog-peach-broker.local:1883
+bulls_wifi_ssid,data,string,BullsWiFi
+bulls_wifi_pass,data,string,BullsPassword
+bulls_mqtt_uri,data,string,mqtt://bulls-broker.local:1883
