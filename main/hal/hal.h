@@ -170,6 +170,8 @@ public:
     void pmicEnterAppSleep();
     void pmicExitAppSleep();
     bool isPmicAppSleep();
+    bool isCounterApplianceMode(bool loadFromSettings = false);
+    void setCounterApplianceMode(bool enabled, bool saveToSettings = false);
     void pmicLogPmg0State(const char* reason);
     void pmicRunPmg0PublicApiProbe(const char* mode);
     bool pmicGetPmg0Level(uint8_t& level);
@@ -288,6 +290,7 @@ private:
     AudioSpectrumFrame _audio_spectrum;
     int _bl_brightness = 80;
     int _spk_volume    = 80;
+    bool _counter_appliance_mode = true;
 
     void i2c_init();
     void i2c_detect();

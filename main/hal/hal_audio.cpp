@@ -16,6 +16,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <mutex>
+#include <nvs.h>
 
 static const std::string_view _tag = "HAL-Audio";
 
@@ -32,8 +33,16 @@ public:
     static constexpr int spectrum_fft_size = 512;
     static constexpr int spectrum_hop_size = 256;
 
+    bool isInitialized() const
+    {
+        return _initialized;
+    }
+
     void init(i2c_master_bus_handle_t i2c_bus)
     {
+        if (_initialized) {
+            return;
+        }
         _silence_buffer.resize(sample_rate * 0.1);
         _silence_buffer.assign(_silence_buffer.size(), 0);
         _spectrum_init();
@@ -78,6 +87,7 @@ public:
             .sample_rate     = sample_rate,
         };
         esp_codec_dev_open(_codec_dev, &fs);
+        _initialized = true;
     }
 
     void updateSpectrum(Hal::AudioSpectrumFrame& frame)
@@ -433,11 +443,19 @@ private:
     float _spectrum_normalization_level                                            = 0.03f;
     bool _spectrum_available                                                       = false;
     bool _is_playing                                                               = false;
+    bool _initialized                                                              = false;
 } _audio_codec;
 
 void Hal::audio_init()
 {
     mclog::tagInfo(_tag, "init");
+
+    if (isCounterApplianceMode(true)) {
+        mclog::tagInfo(_tag, "disabled by Counter Appliance Mode");
+        _spk_volume = getSpeakerVolume(true);
+        ioe_speaker_enable(false);
+        return;
+    }
 
     _audio_codec.init(i2c_bus_get_internal_bus_handle(_i2c_bus));
 
@@ -453,7 +471,9 @@ void Hal::setSpeakerVolume(int volume, bool saveToSettings)
     _spk_volume = uitk::clamp(_spk_volume, 0, 100);
 
     mclog::tagInfo(_tag, "set speaker volume to {}", _spk_volume);
-    _audio_codec.setVolume(_spk_volume);
+    if (!isCounterApplianceMode() && _audio_codec.isInitialized()) {
+        _audio_codec.setVolume(_spk_volume);
+    }
 
     if (saveToSettings) {
         Settings settings(std::string(Hal::SettingsNs), true);
@@ -464,7 +484,9 @@ void Hal::setSpeakerVolume(int volume, bool saveToSettings)
 
 int Hal::getSpeakerVolume(bool loadFromSettings)
 {
-    _spk_volume = _audio_codec.getVolume();
+    if (!isCounterApplianceMode() && _audio_codec.isInitialized()) {
+        _spk_volume = _audio_codec.getVolume();
+    }
 
     if (loadFromSettings) {
         Settings settings(std::string(Hal::SettingsNs), false);
@@ -478,11 +500,20 @@ int Hal::getSpeakerVolume(bool loadFromSettings)
 
 void Hal::audioRecord(std::vector<int16_t>& data, uint16_t durationMs, float gain)
 {
+    if (isCounterApplianceMode() || !_audio_codec.isInitialized()) {
+        data.clear();
+        return;
+    }
+
     _audio_codec.record(data, durationMs, gain);
 }
 
 void Hal::audioPlay(std::vector<int16_t>& data, bool async)
 {
+    if (isCounterApplianceMode() || !_audio_codec.isInitialized()) {
+        return;
+    }
+
     _audio_codec.play(data, async);
 }
 
@@ -493,6 +524,11 @@ int Hal::getAudioSampleRate()
 
 void Hal::updateAudioSpectrum()
 {
+    if (isCounterApplianceMode() || !_audio_codec.isInitialized()) {
+        _audio_spectrum = {};
+        return;
+    }
+
     _audio_codec.updateSpectrum(_audio_spectrum);
 }
 
@@ -507,6 +543,11 @@ void Hal::playBootSfx()
 {
     mclog::tagInfo(_tag, "play boot sfx");
 
+    if (isCounterApplianceMode() || !_audio_codec.isInitialized()) {
+        mclog::tagInfo(_tag, "boot sfx skipped by Counter Appliance Mode");
+        return;
+    }
+
     const std::size_t byte_count = _boot_sfx_end - _boot_sfx_start;
     if (byte_count == 0 || (byte_count % sizeof(int16_t)) != 0) {
         mclog::tagError(_tag, "boot sfx binary has invalid size: {}", byte_count);
@@ -518,4 +559,73 @@ void Hal::playBootSfx()
     std::vector<int16_t> pcm(samples, samples + count);
 
     audioPlay(pcm, true);
+}
+
+
+bool Hal::isCounterApplianceMode(bool loadFromSettings)
+{
+    if (loadFromSettings) {
+        int32_t stored = 1;
+
+        nvs_handle_t handle;
+        const esp_err_t open_result = nvs_open(std::string(Hal::SettingsNs).c_str(), NVS_READONLY, &handle);
+        if (open_result == ESP_OK) {
+            const esp_err_t read_result = nvs_get_i32(handle, "counter_appliance_mode", &stored);
+            nvs_close(handle);
+
+            if (read_result != ESP_OK && read_result != ESP_ERR_NVS_NOT_FOUND) {
+                mclog::tagWarn(_tag,
+                               "Counter Appliance Mode NVS read failed: {}",
+                               esp_err_to_name(read_result));
+            }
+        } else if (open_result != ESP_ERR_NVS_NOT_FOUND) {
+            mclog::tagWarn(_tag,
+                           "Counter Appliance Mode NVS open failed: {}",
+                           esp_err_to_name(open_result));
+        }
+
+        _counter_appliance_mode = stored != 0;
+        mclog::tagInfo(_tag,
+                       "Counter Appliance Mode loaded from NVS: {}",
+                       _counter_appliance_mode ? "On" : "Off");
+    }
+
+    return _counter_appliance_mode;
+}
+
+void Hal::setCounterApplianceMode(bool enabled, bool saveToSettings)
+{
+    _counter_appliance_mode = enabled;
+    mclog::tagInfo(_tag,
+                   "Counter Appliance Mode set to {}",
+                   _counter_appliance_mode ? "On" : "Off");
+
+    if (saveToSettings) {
+        nvs_handle_t handle;
+        const esp_err_t open_result = nvs_open(std::string(Hal::SettingsNs).c_str(), NVS_READWRITE, &handle);
+        if (open_result != ESP_OK) {
+            mclog::tagWarn(_tag,
+                           "Counter Appliance Mode NVS open for save failed: {}",
+                           esp_err_to_name(open_result));
+            return;
+        }
+
+        esp_err_t result = nvs_set_i32(handle,
+                                       "counter_appliance_mode",
+                                       _counter_appliance_mode ? 1 : 0);
+        if (result == ESP_OK) {
+            result = nvs_commit(handle);
+        }
+        nvs_close(handle);
+
+        if (result == ESP_OK) {
+            mclog::tagInfo(_tag,
+                           "Counter Appliance Mode saved to NVS: {}",
+                           _counter_appliance_mode ? "On" : "Off");
+        } else {
+            mclog::tagWarn(_tag,
+                           "Counter Appliance Mode NVS save failed: {}",
+                           esp_err_to_name(result));
+        }
+    }
 }

@@ -14,6 +14,10 @@ using namespace mooncake;
 using namespace view;
 using namespace setup_workers;
 
+namespace {
+bool s_setup_appliance_mode = true;
+}  // namespace
+
 AppSetup::AppSetup()
 {
     setAppInfo().name = "Settings";
@@ -62,14 +66,33 @@ void AppSetup::rebuildMenuSections()
             },
         },
         {
+            "Appliance Mode",
+            {
+                {fmt::format("{} On", s_setup_appliance_mode ? LV_SYMBOL_OK : "  "),
+                 [&]() {
+                     s_setup_appliance_mode = true;
+                     GetHAL().setCounterApplianceMode(true, true);
+                     _need_warm_reset = true;
+                     _rebuild_menu = true;
+                 }},
+                {fmt::format("{} Off", !s_setup_appliance_mode ? LV_SYMBOL_OK : "  "),
+                 [&]() {
+                     s_setup_appliance_mode = false;
+                     GetHAL().setCounterApplianceMode(false, true);
+                     _need_warm_reset = true;
+                     _rebuild_menu = true;
+                 }},
+            },
+        },
+        {
             "Startup App",
             {
-                {fmt::format("{} Counter", startup_app == counter_service::StartupApp::Counter ? "◉" : "○"),
+                {fmt::format("{} Counter", startup_app == counter_service::StartupApp::Counter ? LV_SYMBOL_OK : "  "),
                  [&]() {
                      counter_service::setStartupApp(counter_service::StartupApp::Counter, true);
                      _rebuild_menu = true;
                  }},
-                {fmt::format("{} Launcher", startup_app == counter_service::StartupApp::Launcher ? "◉" : "○"),
+                {fmt::format("{} Launcher", startup_app == counter_service::StartupApp::Launcher ? LV_SYMBOL_OK : "  "),
                  [&]() {
                      counter_service::setStartupApp(counter_service::StartupApp::Launcher, true);
                      _rebuild_menu = true;
@@ -119,6 +142,8 @@ void AppSetup::onOpen()
     _rebuild_menu    = false;
     _need_warm_reset = false;
     _magic_count     = 0;
+
+    s_setup_appliance_mode = GetHAL().isCounterApplianceMode(true);
 
     rebuildMenuSections();
 
@@ -174,6 +199,7 @@ void AppSetup::onClose()
     _worker.reset();
 
     if (_need_warm_reset) {
-        // GetHAL().requestWarmReboot(6);
+        GetHAL().delay(250);
+        GetHAL().reboot();
     }
 }

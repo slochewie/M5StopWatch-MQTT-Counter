@@ -74,14 +74,19 @@ void Hal::ioe_init()
     _ioe->digitalWrite(PY32_SPK_PA_PIN, 0);
     _ioe->digitalWrite(PY32_OLED_RST_PIN, 1);
     _ioe->digitalWrite(PY32_MUX_CTR_PIN, 0);
-    _ioe->digitalWrite(PY32_AU_EN_PIN, 1);
+    _ioe->digitalWrite(PY32_AU_EN_PIN, GetHAL().isCounterApplianceMode(true) ? 0 : 1);
+    _ioe->digitalWrite(PY32_MOTOR_EN_PIN, 0);
 
     _ioe->setPwmFrequency(5000);
 
     gpio_set_direction(SPK_PA_PIN, GPIO_MODE_OUTPUT);
     gpio_set_level(SPK_PA_PIN, 0);
 
-    _vibrator_init();
+    if (GetHAL().isCounterApplianceMode()) {
+        mclog::tagInfo(_tag, "audio and vibrator outputs disabled by Counter Appliance Mode");
+    } else {
+        _vibrator_init();
+    }
 
     // Make sure PY32_L3B_EN_PIN is set to HIGH
     while (1) {
@@ -108,6 +113,10 @@ void Hal::ioe_tp_reset()
 void Hal::ioe_speaker_enable(bool enable)
 {
     mclog::tagInfo(_tag, "set speaker {}", enable ? "enable" : "disable");
+
+    if (GetHAL().isCounterApplianceMode()) {
+        enable = false;
+    }
 
     if (enable) {
         _ioe->digitalWrite(PY32_SPK_PA_PIN, 1);
@@ -230,10 +239,21 @@ void _vibrator_init()
 
 void Hal::vibrate(uint16_t durationMs, uint8_t strength)
 {
+    if (isCounterApplianceMode()) {
+        return;
+    }
+
     _vibrator.vibrate(durationMs, strength);
 }
 
 void Hal::stopVibrate()
 {
+    if (isCounterApplianceMode()) {
+        if (_ioe) {
+            _ioe->digitalWrite(PY32_MOTOR_EN_PIN, 0);
+        }
+        return;
+    }
+
     _vibrator.stop();
 }

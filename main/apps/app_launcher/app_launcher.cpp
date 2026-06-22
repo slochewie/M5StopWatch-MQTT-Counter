@@ -38,7 +38,9 @@ void AppLauncher::onLauncherOpen()
 
     if (_should_play_boot_sfx) {
         _should_play_boot_sfx = false;
-        GetHAL().playBootSfx();
+        if (!GetHAL().isCounterApplianceMode()) {
+            GetHAL().playBootSfx();
+        }
     }
 
     _last_charge_check_tick = GetHAL().millis();
@@ -128,7 +130,9 @@ void AppLauncher::show_guide_page()
     GetHAL().lvglUnlock();
 
     _should_play_boot_sfx = false;
-    GetHAL().playBootSfx();
+    if (!GetHAL().isCounterApplianceMode()) {
+        GetHAL().playBootSfx();
+    }
 
     input::KeyManager key_manager;
 
