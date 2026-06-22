@@ -1,58 +1,94 @@
-# Location preset NVS
+Location Presets
 
-Location presets are stored in a separate `preset_nvs` partition so real WiFi passwords and broker URIs do not need to be committed to GitHub.
+This project supports predefined deployment locations (for example: Home, McCarthy’s, Library, Frog & Peach, and Bull’s) without committing real credentials to GitHub.
 
-Committed file:
+Overview
 
-- `location_presets.example.csv` - fake values and required key names
+Real WiFi and MQTT connection details are stored in a local CSV file that is not tracked by Git.
 
-Private/generated files, ignored by Git:
+A helper script converts that CSV into a generated C++ source file which is compiled into the firmware.
 
-- `location_presets.private.csv` - your real values
-- `location_presets.bin` - generated NVS image flashed to `preset_nvs`
+factory/location_presets.example.csv
+            │
+            ▼
+Copy to:
+factory/location_presets.private.csv
+            │
+            ▼
+python tools/generate_location_presets.py
+            │
+            ▼
+components/location_presets/location_presets_generated.cpp
+            │
+            ▼
+idf.py build
 
-## Create your private CSV
+Files
 
-```sh
-cp factory/location_presets.example.csv factory/location_presets.private.csv
-```
+Tracked by Git:
 
-Edit `factory/location_presets.private.csv` with the real SSID, WiFi password, and MQTT URI for each location.
+* factory/location_presets.example.csv
+* tools/generate_location_presets.py
 
-Do not change the namespace or key names unless you also update `components/location_presets/location_presets.cpp`.
+Ignored by Git:
 
-## Generate the NVS image
+* factory/location_presets.private.csv
+* components/location_presets/location_presets_generated.cpp
 
-```sh
-python "$IDF_PATH/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py" generate \
-  factory/location_presets.private.csv \
-  factory/location_presets.bin \
-  0x6000
-```
+Create your private preset file
 
-## Flash only the preset partition
+cp factory/location_presets.example.csv \
+   factory/location_presets.private.csv
 
-Replace the serial port with your StopWatch port.
+Edit factory/location_presets.private.csv with your real values.
 
-```sh
-python "$IDF_PATH/components/partition_table/parttool.py" \
-  --port /dev/cu.usbmodemXXXX \
-  write_partition \
-  --partition-name preset_nvs \
-  --input factory/location_presets.bin
-```
+Example format:
 
-After flashing, open Settings > Location on the StopWatch. Selecting a location copies that preset into the normal Configure NVS values and reboots the device.
+id,name,wifi_ssid,wifi_password,mqtt_uri
+home,Home,HomeSSID,HomePassword,mqtt://192.168.1.10:1883
+mccarthys,McCarthy's,VenueSSID,VenuePassword,mqtt://192.168.10.5:1883
+library,Library,LibrarySSID,LibraryPassword,mqtt://192.168.20.5:1883
+frog_peach,Frog & Peach,FrogSSID,FrogPassword,mqtt://192.168.30.5:1883
+bulls,Bull's,BullsSSID,BullsPassword,mqtt://192.168.40.5:1883
 
-Only these active values are overwritten:
+Generate the source file
 
-- WiFi SSID
-- WiFi password
-- MQTT URI
+Run:
 
-These existing Configure values are preserved:
+python tools/generate_location_presets.py
 
-- Device name
-- MQTT username
-- MQTT password
-- Counter topic
+This produces:
+
+components/location_presets/location_presets_generated.cpp
+
+which is compiled into the firmware but is never committed to Git.
+
+Building
+
+After generating the source file, build normally:
+
+idf.py build
+
+or
+
+idf.py flash monitor
+
+Runtime behavior
+
+The Settings → Location menu allows selecting one of the predefined locations.
+
+Selecting a location updates the active configuration stored in NVS and reboots the device.
+
+The following values are replaced:
+
+* WiFi SSID
+* WiFi password
+* MQTT URI
+
+The following values remain unchanged:
+
+* Device name
+* MQTT username
+* MQTT password
+* Counter topic(s)
+* Any other unrelated device settings
