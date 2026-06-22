@@ -38,7 +38,8 @@ namespace {
 
 static constexpr const char* TAG = "SleepManager";
 
-static constexpr uint32_t DISPLAY_SLEEP_TIMEOUT_MS = 30000;
+static constexpr uint32_t DISPLAY_STANDBY_TIMEOUT_MS = 10000;
+static constexpr uint32_t DEEP_SLEEP_TIMEOUT_MS = 30000;
 static constexpr uint32_t IMU_SAMPLE_INTERVAL_MS = 100;
 static constexpr uint32_t POST_SLEEP_WAKE_LOCKOUT_MS = 1200;
 static constexpr uint32_t PMG0_SAMPLE_INTERVAL_MS = 100;
@@ -57,6 +58,7 @@ static constexpr uint8_t PMG0_WAKE_CONFIRM_SAMPLES = 1;
 bool s_initialized = false;
 bool s_inhibit = false;
 bool s_sleeping = false;
+bool s_display_standby = false;
 
 uint32_t s_last_activity_ms = 0;
 uint32_t s_last_imu_sample_ms = 0;
@@ -230,6 +232,42 @@ void enforceNetworkPauseWhileSleeping()
     }
 }
 
+void enterDisplayStandby()
+{
+    if (s_display_standby) {
+        return;
+    }
+
+    s_display_standby = true;
+    s_saved_brightness = GetHAL().getBackLightBrightness();
+    if (s_saved_brightness <= 0) {
+        s_saved_brightness = 20;
+    }
+
+    mclog::tagInfo(TAG, "display/network standby enter after {} ms idle",
+                   DISPLAY_STANDBY_TIMEOUT_MS);
+
+    GetHAL().setBackLightBrightness(0);
+    GetHAL().getDisplay().sleep();
+
+    disconnectNetworkForSleep();
+}
+
+void exitDisplayStandby()
+{
+    if (!s_display_standby) {
+        return;
+    }
+
+    mclog::tagInfo(TAG, "display standby wake; network remains deferred");
+    s_display_standby = false;
+
+    GetHAL().getDisplay().wakeup();
+    GetHAL().setBackLightBrightness(s_saved_brightness > 0 ? s_saved_brightness : 20);
+
+    resetPmg0Sampler();
+}
+
 void restoreNetworkAfterWake()
 {
     if (!s_sleeping) {
@@ -237,18 +275,7 @@ void restoreNetworkAfterWake()
         return;
     }
 
-    mclog::tagInfo(TAG, "network wake: resume Wi-Fi recovery, start radio, then resume MQTT");
-
-    common::wifi::setRecoveryPaused(false);
-
-    const esp_err_t start_err = esp_wifi_start();
-    if (start_err != ESP_OK &&
-        start_err != ESP_ERR_WIFI_NOT_INIT &&
-        start_err != ESP_ERR_INVALID_STATE) {
-        mclog::tagWarn(TAG, "esp_wifi_start failed: {}", esp_err_to_name(start_err));
-    }
-
-    common::mqtt::setRecoveryPaused(false);
+    mclog::tagInfo(TAG, "network wake deferred until requested");
 }
 
 void enterSleep()
@@ -259,6 +286,7 @@ void enterSleep()
 
     mclog::tagInfo(TAG, "ESP32 deep sleep enter");
 
+    s_display_standby = false;
     GetHAL().setBackLightBrightness(0);
     GetHAL().getDisplay().sleep();
 
@@ -305,6 +333,7 @@ void exitSleep()
     restoreNetworkAfterWake();
 
     s_sleeping = false;
+    s_display_standby = false;
     resetPmg0Sampler();
 }
 
@@ -367,6 +396,9 @@ void update()
         if (s_sleeping) {
             exitSleep();
         }
+        if (s_display_standby) {
+            exitDisplayStandby();
+        }
         resetIdleState();
         return;
     }
@@ -427,45 +459,74 @@ void update()
         return;
     }
 
-    if (readTouchActivity()) {
+    const bool touch_activity = readTouchActivity();
+    const bool button_activity = GetHAL().btnA.isPressed() ||
+                                 GetHAL().btnB.isPressed() ||
+                                 GetHAL().btnPwr.isPressed();
+
+    if (s_display_standby && (touch_activity || button_activity)) {
+        exitDisplayStandby();
         markActivity();
         return;
     }
 
-    if (GetHAL().btnA.isPressed() || GetHAL().btnB.isPressed() || GetHAL().btnPwr.isPressed()) {
+    if (!s_display_standby && touch_activity) {
         markActivity();
         return;
     }
 
-    if (now - s_last_activity_ms < DISPLAY_SLEEP_TIMEOUT_MS) {
+    if (!s_display_standby && button_activity) {
+        markActivity();
         return;
     }
 
-    if (sampleImuIfDue()) {
-        const bool hanging = isHangingOrientation();
+    const uint32_t idle_ms = now - s_last_activity_ms;
 
-        static uint32_t s_last_sleep_diag_ms = 0;
-        if (now - s_last_sleep_diag_ms >= 2000) {
-            s_last_sleep_diag_ms = now;
-            mclog::tagInfo(TAG,
-                           "sleep check: idle={} hanging={} confirm={}",
-                           now - s_last_activity_ms,
-                           hanging ? 1 : 0,
-                           static_cast<int>(s_sleep_orientation_count));
-        }
+    // Both the 10-second display/network standby and the 30-second L2 deep sleep
+    // are allowed only while the StopWatch is hanging upside down. If it is not
+    // hanging, treat that as active/handheld use and keep the display/network awake.
+    if (!sampleImuIfDue()) {
+        return;
+    }
 
-        if (hanging) {
-            if (s_sleep_orientation_count < SLEEP_CONFIRM_SAMPLES) {
-                ++s_sleep_orientation_count;
-            }
-        } else {
-            s_sleep_orientation_count = 0;
+    const bool hanging = isHangingOrientation();
+
+    static uint32_t s_last_sleep_diag_ms = 0;
+    if (now - s_last_sleep_diag_ms >= 2000) {
+        s_last_sleep_diag_ms = now;
+        mclog::tagInfo(TAG,
+                       "sleep check: idle={} hanging={} confirm={}",
+                       idle_ms,
+                       hanging ? 1 : 0,
+                       static_cast<int>(s_sleep_orientation_count));
+    }
+
+    if (!hanging) {
+        s_sleep_orientation_count = 0;
+
+        // Do not wake the 10-second display/network standby just because the
+        // device moved out of hanging orientation. Standby wake is intentionally
+        // touch/button only; motion/orientation should only prevent entering
+        // deeper L2 sleep.
+        if (!s_display_standby) {
             s_last_activity_ms = now;
         }
+        return;
+    }
 
-        if (s_sleep_orientation_count >= SLEEP_CONFIRM_SAMPLES) {
-            enterSleep();
-        }
+    if (s_sleep_orientation_count < SLEEP_CONFIRM_SAMPLES) {
+        ++s_sleep_orientation_count;
+    }
+
+    if (!s_display_standby &&
+        idle_ms >= DISPLAY_STANDBY_TIMEOUT_MS &&
+        s_sleep_orientation_count >= SLEEP_CONFIRM_SAMPLES) {
+        enterDisplayStandby();
+    }
+
+    if (idle_ms >= DEEP_SLEEP_TIMEOUT_MS &&
+        s_sleep_orientation_count >= SLEEP_CONFIRM_SAMPLES) {
+        enterSleep();
     }
 }
 
@@ -474,6 +535,9 @@ void setInhibit(bool inhibit)
     s_inhibit = inhibit;
     if (s_inhibit && s_sleeping) {
         exitSleep();
+    }
+    if (s_inhibit && s_display_standby) {
+        exitDisplayStandby();
     }
     if (s_inhibit) {
         resetIdleState();
@@ -487,13 +551,17 @@ bool isInhibited()
 
 bool isSleeping()
 {
-    return s_sleeping;
+    return s_sleeping || s_display_standby;
 }
 
 void markActivity()
 {
     if (s_sleeping) {
         return;
+    }
+
+    if (s_display_standby) {
+        exitDisplayStandby();
     }
 
     s_last_activity_ms = GetHAL().millis();
@@ -505,7 +573,34 @@ void markActivity()
 
 void wake()
 {
+    if (s_display_standby) {
+        exitDisplayStandby();
+        markActivity();
+        return;
+    }
+
     exitSleep();
+}
+
+void requestNetworkResume()
+{
+    mclog::tagInfo(TAG, "network resume requested");
+
+    if (s_display_standby) {
+        exitDisplayStandby();
+        markActivity();
+    }
+
+    common::wifi::setRecoveryPaused(false);
+
+    const esp_err_t start_err = esp_wifi_start();
+    if (start_err != ESP_OK &&
+        start_err != ESP_ERR_WIFI_NOT_INIT &&
+        start_err != ESP_ERR_INVALID_STATE) {
+        mclog::tagWarn(TAG, "esp_wifi_start failed: {}", esp_err_to_name(start_err));
+    }
+
+    common::mqtt::setRecoveryPaused(false);
 }
 
 }  // namespace sleep_manager

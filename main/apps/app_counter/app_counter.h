@@ -40,6 +40,7 @@ private:
     bool _reset_requested = false;
     bool _reset_pressing = false;
     bool _sleeping = false;
+    bool _publish_pending = false;
 
     bool syncLatestMqttValue(bool refresh_ui);
     void increment();
@@ -48,6 +49,9 @@ private:
     void markActivity();
     void enterDisplaySleep();
     void wakeFromDisplaySleep();
+    void requestNetworkForPublish();
+    void publishCurrentValue();
+    void publishPendingValueIfNeeded();
     bool updateOrientationWake();
     bool hasTouchInput();
     void refreshTime(bool force = false);

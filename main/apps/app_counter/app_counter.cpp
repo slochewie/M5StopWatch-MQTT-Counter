@@ -13,6 +13,7 @@
 #include <nvs_flash.h>
 #include <cstdio>
 #include <counter_service.h>
+#include <apps/common/sleep_manager/sleep_manager.h>
 
 using namespace mooncake;
 using namespace smooth_ui_toolkit::lvgl_cpp;
@@ -27,12 +28,19 @@ static constexpr float WAKE_ACCEL_Y_THRESHOLD = 0.30f;
 static constexpr float WAKE_ACCEL_Z_THRESHOLD = 0.35f;
 static constexpr uint8_t WAKE_CONFIRM_SAMPLES = 3;
 static constexpr uint32_t NETWORK_WAKE_RECOVERY_DELAY_MS = 2000;
+static constexpr uint32_t NETWORK_RECOVERY_RETRY_MS = 1000;
 static constexpr uint32_t RESET_LONG_PRESS_MS = 2000;
 static constexpr const char* COUNTER_NVS_NAMESPACE = "counter";
 static constexpr const char* COUNTER_NVS_KEY = "last_value";
 
 bool s_network_recover_pending = false;
 uint32_t s_network_recover_after_ms = 0;
+
+void scheduleNetworkRecovery(uint32_t delay_ms)
+{
+    s_network_recover_pending = true;
+    s_network_recover_after_ms = GetHAL().millis() + delay_ms;
+}
 
 void enterPhase2LightSleepTick()
 {
@@ -101,6 +109,7 @@ void AppCounter::onOpen()
     _last_published_battery = 255;
     _wake_sample_count = 0;
     _sleeping = false;
+    _publish_pending = false;
     s_network_recover_pending = false;
     s_network_recover_after_ms = 0;
 
@@ -135,7 +144,7 @@ void AppCounter::onRunning()
         const bool orientation_wake = updateOrientationWake();
 
         // Do not perform MQTT sync or publish work while display/light sleep is active.
-        // Long sleep periods can leave the Wi-Fi/MQTT stack stale; recover after wake instead.
+        // Touch/orientation wake only restores the display; publish actions request network.
         if (button_wake || touch_wake || orientation_wake) {
             wakeFromDisplaySleep();
             LvglLockGuard lock;
@@ -155,7 +164,11 @@ void AppCounter::onRunning()
         counter_service::recoverConnection();
     }
 
-    syncLatestMqttValue(true);
+    publishPendingValueIfNeeded();
+
+    if (!_publish_pending) {
+        syncLatestMqttValue(true);
+    }
 
     if (_reset_requested) {
         _reset_requested = false;
@@ -212,6 +225,10 @@ void AppCounter::onClose()
 
 bool AppCounter::syncLatestMqttValue(bool refresh_ui)
 {
+    if (_publish_pending) {
+        return false;
+    }
+
     int32_t mqtt_value = 0;
     if (!counter_service::takeLatestValue(mqtt_value)) {
         return false;
@@ -239,7 +256,7 @@ void AppCounter::increment()
 
     ++_count;
     savePersistedCount(_count);
-    (void)counter_service::publishValue(_count);
+    publishCurrentValue();
     LvglLockGuard lock;
     refreshValue();
 }
@@ -252,7 +269,7 @@ void AppCounter::decrement()
         --_count;
     }
     savePersistedCount(_count);
-    (void)counter_service::publishValue(_count);
+    publishCurrentValue();
     LvglLockGuard lock;
     refreshValue();
 }
@@ -261,7 +278,7 @@ void AppCounter::reset()
 {
     _count = 0;
     savePersistedCount(_count);
-    (void)counter_service::publishValue(_count);
+    publishCurrentValue();
     LvglLockGuard lock;
     refreshValue();
 }
@@ -299,9 +316,46 @@ void AppCounter::wakeFromDisplaySleep()
     _sleeping = false;
     _wake_sample_count = 0;
     GetHAL().setBackLightBrightness(_saved_brightness > 0 ? _saved_brightness : 80);
-    s_network_recover_pending = true;
-    s_network_recover_after_ms = GetHAL().millis() + NETWORK_WAKE_RECOVERY_DELAY_MS;
     markActivity();
+}
+
+void AppCounter::requestNetworkForPublish()
+{
+    sleep_manager::requestNetworkResume();
+    scheduleNetworkRecovery(NETWORK_WAKE_RECOVERY_DELAY_MS);
+}
+
+void AppCounter::publishCurrentValue()
+{
+    requestNetworkForPublish();
+
+    if (counter_service::publishValue(_count)) {
+        _publish_pending = false;
+        return;
+    }
+
+    _publish_pending = true;
+    scheduleNetworkRecovery(NETWORK_RECOVERY_RETRY_MS);
+}
+
+void AppCounter::publishPendingValueIfNeeded()
+{
+    if (!_publish_pending) {
+        return;
+    }
+
+    requestNetworkForPublish();
+
+    if (counter_service::publishValue(_count)) {
+        _publish_pending = false;
+        LvglLockGuard lock;
+        refreshStatus();
+        return;
+    }
+
+    if (!s_network_recover_pending) {
+        scheduleNetworkRecovery(NETWORK_RECOVERY_RETRY_MS);
+    }
 }
 
 bool AppCounter::updateOrientationWake()
@@ -364,12 +418,14 @@ void AppCounter::refreshStatus()
         topic = "topic not set";
     }
 
+    const char* status = _publish_pending ? "MQTT pending" : counter_service::statusText();
+
     char buffer[128];
     std::snprintf(buffer,
                   sizeof(buffer),
                   "Bat %u%%   %s\n%s",
                   static_cast<unsigned>(GetHAL().getBatteryLevel()),
-                  counter_service::statusText(),
+                  status,
                   topic);
     lv_label_set_text(_label_status, buffer);
 }

@@ -17,5 +17,6 @@ bool isSleeping();
 
 void markActivity();
 void wake();
+void requestNetworkResume();
 
 }  // namespace sleep_manager
