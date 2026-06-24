@@ -8,7 +8,16 @@
 
 namespace location_presets {
 
-extern const Preset* generatedPresets(size_t* count) __attribute__((weak));
+// This function is provided by the generated, gitignored file:
+// components/location_presets/location_presets_generated.cpp
+//
+// Generate it with:
+//   python tools/generate_location_presets.py
+//
+// Intentionally not weak: if the generated file is missing from the build,
+// the build/link should fail instead of producing runtime "preset unavailable"
+// warnings that hide the real problem.
+const Preset* generatedPresets(size_t* count);
 
 namespace {
 
@@ -33,12 +42,6 @@ bool ensureNvsReady()
 
 const Preset* presets(size_t* out_count)
 {
-    if (out_count != nullptr) {
-        *out_count = 0;
-    }
-    if (generatedPresets == nullptr) {
-        return nullptr;
-    }
     return generatedPresets(out_count);
 }
 
@@ -55,8 +58,18 @@ void saveSelectedIndex(int index)
         return;
     }
 
-    nvs_set_i32(handle, SELECTED_KEY, index);
-    nvs_commit(handle);
+    err = nvs_set_i32(handle, SELECTED_KEY, index);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "nvs_set_i32 selected failed: %s", esp_err_to_name(err));
+        nvs_close(handle);
+        return;
+    }
+
+    err = nvs_commit(handle);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "nvs_commit selected failed: %s", esp_err_to_name(err));
+    }
+
     nvs_close(handle);
 }
 
@@ -128,12 +141,12 @@ bool apply(size_t index)
     config.mqtt_uri = preset->mqtt_uri;
 
     if (!device_config::save(config)) {
-        ESP_LOGE(TAG, "Failed to save active config for %s", preset->name);
+        ESP_LOGE(TAG, "Failed to save active config for %s", preset->name == nullptr ? "<unnamed>" : preset->name);
         return false;
     }
 
     saveSelectedIndex(static_cast<int>(index));
-    ESP_LOGI(TAG, "Applied location preset: %s", preset->name);
+    ESP_LOGI(TAG, "Applied location preset: %s", preset->name == nullptr ? "<unnamed>" : preset->name);
     return true;
 }
 
