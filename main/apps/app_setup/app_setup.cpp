@@ -458,7 +458,6 @@ void AppSetup::onCreate()
 
 void AppSetup::rebuildMenuSections()
 {
-//    const auto startup_app = counter_service::getStartupApp();
 
     _menu_sections = {
         {
