@@ -43,11 +43,25 @@ idf.py menuconfig
 idf.py build
 ```
 
+The generated application binary is named from the project declaration in the root `CMakeLists.txt`:
+
+```text
+build/StopWatch-MQTT-Counter.bin
+```
+
 ## Flash
 
 ```bash
 idf.py flash
 ```
+
+If ESP-IDF does not automatically choose the correct serial port, specify it explicitly:
+
+```bash
+idf.py -p /dev/cu.usbmodem101 flash
+```
+
+On macOS, the exact device path may differ.
 
 ## Monitor
 
@@ -73,52 +87,13 @@ idf.py set-target esp32s3
 idf.py build
 ```
 
-## Expected Flash Layout
+## Flash Layout
 
-A typical flash command writes:
-
-| Offset | Image |
-| --- | --- |
-| `0x0` | Bootloader |
-| `0x8000` | Partition table |
-| `0xd000` | OTA data |
-| `0x20000` | Application binary |
-
-Recent flash command shape:
-
-```text
-write_flash --flash_mode dio --flash_freq 80m --flash_size 16MB \
-  0x0 bootloader/bootloader.bin \
-  0x20000 StopWatch-MQTT-Counter.bin \
-  0x8000 partition_table/partition-table.bin \
-  0xd000 ota_data_initial.bin
-```
-
-ESP-IDF prints the exact command after a successful build.
-
-## Partition Layout
-
-A recent build generated this partition table:
-
-| Name | Type | Subtype | Offset | Size |
-| --- | --- | --- | --- | --- |
-| `nvs` | data | nvs | `0x9000` | 16K |
-| `otadata` | data | ota | `0xd000` | 8K |
-| `phy_init` | data | phy | `0xf000` | 4K |
-| `ota_0` | app | ota_0 | `0x20000` | 5056K |
-| `ota_1` | app | ota_1 | `0x510000` | 5056K |
-| `storage` | data | fat | `0xa00000` | 4M |
-| `coredump` | data | coredump | `0xe00000` | 64K |
+ESP-IDF prints the exact flash command after a successful build. In normal use, prefer `idf.py flash` instead of copying the generated `esptool.py` command manually.
 
 ## Managed Dependencies
 
-The project uses ESP-IDF component-manager dependencies. Recent build output reported newer versions available for some managed dependencies, for example:
-
-```text
-Dependency "espressif/esp-dsp": "1.8.0" -> "1.8.2"
-Dependency "espressif/esp_codec_dev": "1.5.4" -> "1.5.10"
-Dependency "espressif/i2c_bus": "1.5.0" -> "1.5.2"
-```
+The project uses ESP-IDF component-manager dependencies.
 
 Do not update dependencies casually if the firmware is building and flashing correctly. To intentionally refresh the lock file for testing, use:
 
