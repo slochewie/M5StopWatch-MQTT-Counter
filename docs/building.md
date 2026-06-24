@@ -49,24 +49,6 @@ idf.py build
 idf.py flash
 ```
 
-A recent successful flash used:
-
-```text
-Serial port /dev/cu.usbmodem101
-Chip is ESP32-S3 (QFN56) (revision v0.2)
-Features: WiFi, BLE, Embedded PSRAM 8MB (AP_3v3)
-USB mode: USB-Serial/JTAG
-Flash size: 16MB
-```
-
-If ESP-IDF does not automatically choose the correct serial port, specify it explicitly:
-
-```bash
-idf.py -p /dev/cu.usbmodem101 flash
-```
-
-On macOS, the exact device path may differ.
-
 ## Monitor
 
 ```bash
