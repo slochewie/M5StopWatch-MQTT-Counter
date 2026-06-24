@@ -6,15 +6,6 @@ This project is built and flashed with Espressif ESP-IDF targeting the M5Stack S
 
 The current local build/flash workflow is using ESP-IDF **v5.5.4**.
 
-Recent successful build output shows:
-
-```text
-NOTICE: [6/6] idf (5.5.4)
-/Users/aaron/.espressif/v5.5.4/esp-idf/
-```
-
-Older project notes may mention ESP-IDF 5.4, but the current working environment is ESP-IDF 5.5.4.
-
 ## Prerequisites
 
 - ESP-IDF v5.5.x recommended based on the current working setup
