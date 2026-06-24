@@ -146,9 +146,6 @@ See [`docs/architecture.md`](docs/architecture.md) and [`docs/mqtt.md`](docs/mqt
 | Increment | ![Increment](docs/screenshots/increment.svg) |
 | Decrement | ![Decrement](docs/screenshots/decrement.svg) |
 | Reset | ![Reset](docs/screenshots/reset.svg) |
-| Diagnostics mockup | ![Diagnostics](docs/screenshots/diagnostics.svg) |
-| MQTT sync concept | ![MQTT sync](docs/screenshots/mqtt-sync.svg) |
-| Sleep mode concept | ![Sleep mode](docs/screenshots/sleep-mode.svg) |
 
 ## Documentation
 
