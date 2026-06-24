@@ -2,7 +2,7 @@
 
 MQTT-synchronized capacity counter firmware for the M5Stack StopWatch.
 
-![Counter app launcher](docs/screenshots/launcher-icon-counter.png)
+![Counter app launcher](docs/screenshots/launcher-counter-selected.png)
 
 ## Overview
 
