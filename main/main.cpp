@@ -84,7 +84,7 @@ extern "C" void app_main(void)
 
     GetMooncake().installApp(std::make_unique<AppLauncher>());
     GetMooncake().installApp(std::make_unique<AppCounter>());
-    GetMooncake().installApp(std::make_unique<AppConfigure>());
+    //GetMooncake().installApp(std::make_unique<AppConfigure>());
     GetMooncake().installApp(std::make_unique<AppSetup>());
 
     while (1) {
