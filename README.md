@@ -6,14 +6,14 @@ MQTT-synchronized capacity counter firmware for the M5Stack StopWatch.
 
 ## Overview
 
-M5StopWatch MQTT Counter turns the M5Stack StopWatch into a battery-powered venue capacity counter. The firmware adds a dedicated **Counter** app to the StopWatch launcher, displays the shared count on the round 466 × 466 screen, and synchronizes count changes over MQTT.
+M5StopWatch MQTT Counter turns the M5Stack StopWatch into a battery-powered venue capacity counter. The firmware adds a dedicated **Counter** app to the StopWatch launcher, displays the shared count on the round 466 × 466 AMOLED screen, and synchronizes count changes over MQTT.
 
-The project is built with **ESP-IDF** and is based on the original M5Stack StopWatch User Demo firmware. The current firmware focuses on reliable physical-button counting, MQTT synchronization, long-press reset protection, battery publishing, and power-management work for hanging/lanyard use.
+The project is built with **ESP-IDF** and is based on the original M5Stack StopWatch User Demo firmware. The current firmware focuses on reliable physical-button counting, MQTT synchronization, long-press reset protection, battery publishing, AMOLED-friendly UI assets, and power-management work for hanging/lanyard use.
 
 ## Current Features
 
 - Counter app integrated into the StopWatch launcher.
-- Mechanical tally-counter launcher icon.
+- AMOLED-optimized Counter launcher icon.
 - Round LVGL Counter app UI with true-black background.
 - Arc-top clock/status UI shared with the launcher style.
 - Physical button controls:
@@ -34,9 +34,9 @@ The project is built with **ESP-IDF** and is based on the original M5Stack StopW
 
 ### Launcher
 
-The Counter app appears in the StopWatch launcher carousel with the mechanical tally-counter icon.
+The Counter app appears in the StopWatch launcher carousel with the AMOLED-optimized Counter icon.
 
-![Counter selected in launcher](docs/screenshots/launcher-icon-counter.png)
+![Counter selected in launcher](docs/screenshots/launcher-counter-selected.png)
 
 ### Counter App
 
@@ -56,7 +56,7 @@ Target device:
 
 - M5Stack StopWatch
 - ESP32-S3
-- Round 466 × 466 touchscreen display
+- Round 466 × 466 AMOLED touchscreen display
 - Integrated battery
 - IMU motion sensor
 - Physical KEYA and KEYB buttons
@@ -272,6 +272,7 @@ Active development.
 Recent focus:
 
 - Counter launcher integration
+- AMOLED-optimized launcher artwork
 - MQTT synchronization reliability
 - Long-press reset safety
 - Battery publishing
