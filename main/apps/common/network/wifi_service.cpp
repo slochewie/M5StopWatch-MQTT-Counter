@@ -257,6 +257,15 @@ bool applyConfig()
     std::strncpy(reinterpret_cast<char*>(wifi_config.sta.password),
                  s_config.password.c_str(),
                  sizeof(wifi_config.sta.password) - 1);
+
+    const uint8_t preferred_channel = s_config.channel <= 14 ? s_config.channel : 0;
+    wifi_config.sta.channel = preferred_channel;
+    ESP_LOGI(TAG,
+             "Wi-Fi STA config: ssid=%s channel=%u%s",
+             s_config.ssid.c_str(),
+             static_cast<unsigned>(preferred_channel),
+             preferred_channel == 0 ? " (auto)" : "");
+
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     wifi_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
 
@@ -477,6 +486,11 @@ bool isConnected()
 const char* ssid()
 {
     return s_config.ssid.empty() ? "" : s_config.ssid.c_str();
+}
+
+uint8_t channel()
+{
+    return s_config.channel <= 14 ? s_config.channel : 0;
 }
 
 const char* statusText()

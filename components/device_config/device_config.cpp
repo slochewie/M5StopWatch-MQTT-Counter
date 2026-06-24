@@ -61,6 +61,35 @@ bool writeString(nvs_handle_t handle, const char* key, const std::string& value)
     return true;
 }
 
+uint8_t readU8(nvs_handle_t handle, const char* key, uint8_t fallback)
+{
+    uint8_t value = fallback;
+    const esp_err_t err = nvs_get_u8(handle, key, &value);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        return fallback;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to read %s: %s", key, esp_err_to_name(err));
+        return fallback;
+    }
+    return value;
+}
+
+bool writeU8(nvs_handle_t handle, const char* key, uint8_t value)
+{
+    esp_err_t err = nvs_set_u8(handle, key, value);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write %s: %s", key, esp_err_to_name(err));
+        return false;
+    }
+    return true;
+}
+
+uint8_t normalizeWifiChannel(uint8_t channel)
+{
+    return (channel == 1 || channel == 6 || channel == 11) ? channel : 0;
+}
+
 }  // namespace
 
 Config defaults()
@@ -88,6 +117,7 @@ Config load()
     config.device_name = readString(handle, "device", config.device_name);
     config.wifi_ssid = readString(handle, "wifi_ssid", config.wifi_ssid);
     config.wifi_password = readString(handle, "wifi_pass", config.wifi_password);
+    config.wifi_channel = normalizeWifiChannel(readU8(handle, "wifi_channel", config.wifi_channel));
     config.mqtt_uri = readString(handle, "mqtt_uri", config.mqtt_uri);
     config.mqtt_username = readString(handle, "mqtt_user", config.mqtt_username);
     config.mqtt_password = readString(handle, "mqtt_pass", config.mqtt_password);
@@ -114,6 +144,7 @@ bool save(const Config& config)
     ok = writeString(handle, "device", config.device_name) && ok;
     ok = writeString(handle, "wifi_ssid", config.wifi_ssid) && ok;
     ok = writeString(handle, "wifi_pass", config.wifi_password) && ok;
+    ok = writeU8(handle, "wifi_channel", normalizeWifiChannel(config.wifi_channel)) && ok;
     ok = writeString(handle, "mqtt_uri", config.mqtt_uri) && ok;
     ok = writeString(handle, "mqtt_user", config.mqtt_username) && ok;
     ok = writeString(handle, "mqtt_pass", config.mqtt_password) && ok;

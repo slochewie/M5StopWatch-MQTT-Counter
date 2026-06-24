@@ -139,6 +139,7 @@ bool apply(size_t index)
     config.wifi_ssid = preset->wifi_ssid;
     config.wifi_password = preset->wifi_password == nullptr ? "" : preset->wifi_password;
     config.mqtt_uri = preset->mqtt_uri;
+    config.wifi_channel = 0;  // Location selection defaults WiFi channel back to Auto.
 
     if (!device_config::save(config)) {
         ESP_LOGE(TAG, "Failed to save active config for %s", preset->name == nullptr ? "<unnamed>" : preset->name);

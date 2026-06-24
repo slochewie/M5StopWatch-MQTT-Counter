@@ -270,7 +270,8 @@ private:
 
 class WifiWorker : public WorkerBase {
 public:
-    WifiWorker()
+    explicit WifiWorker(bool& need_warm_reset)
+        : _need_warm_reset(need_warm_reset)
     {
         rebuildMenuSections();
         _menu_page = std::make_unique<view::SelectMenuPage>(_menu_sections);
@@ -292,32 +293,51 @@ public:
 private:
     std::vector<view::SelectMenuPage::MenuSection> _menu_sections;
     std::unique_ptr<view::SelectMenuPage> _menu_page;
+    bool& _need_warm_reset;
+
+    void addChannelItem(std::vector<view::SelectMenuPage::MenuItem>& items, uint8_t channel, const char* label)
+    {
+        const uint8_t selected_channel = counter_service::wifiChannel();
+        items.push_back(
+            {
+                fmt::format("{} {}", selected_channel == channel ? LV_SYMBOL_OK : "  ", label),
+                [this, channel]() {
+                    counter_service::setWifiChannel(channel, true);
+                    _need_warm_reset = true;
+                    _is_done = true;
+                },
+            });
+    }
 
     void rebuildMenuSections()
     {
         const bool wifi_enabled = counter_service::isWifiEnabled();
+        std::vector<view::SelectMenuPage::MenuItem> items = {
+            {fmt::format("{} On", wifi_enabled ? LV_SYMBOL_OK : "  "),
+             [this]() {
+                 counter_service::setWifiEnabled(true, true);
+                 _is_done = true;
+             }},
+            {fmt::format("{} Off", !wifi_enabled ? LV_SYMBOL_OK : "  "),
+             [this]() {
+                 counter_service::setWifiEnabled(false, true);
+                 _is_done = true;
+             }},
+        };
+
+        addChannelItem(items, 0, "Channel: Auto");
+        addChannelItem(items, 1, "Channel: 1");
+        addChannelItem(items, 6, "Channel: 6");
+        addChannelItem(items, 11, "Channel: 11");
 
         _menu_sections = {
             {
                 "WiFi",
-                {
-                    {fmt::format("{} On", wifi_enabled ? LV_SYMBOL_OK : "  "),
-                     [this]() {
-                         counter_service::setWifiEnabled(true, true);
-                         _is_done = true;
-                     }},
-                    {fmt::format("{} Off", !wifi_enabled ? LV_SYMBOL_OK : "  "),
-                     [this]() {
-                         counter_service::setWifiEnabled(false, true);
-                         _is_done = true;
-                     }},
-                },
+                items,
             },
         };
     }
 };
-
-
 
 class MqttWorker : public WorkerBase {
 public:
@@ -438,7 +458,7 @@ void AppSetup::onCreate()
 
 void AppSetup::rebuildMenuSections()
 {
-    const auto startup_app = counter_service::getStartupApp();
+//    const auto startup_app = counter_service::getStartupApp();
 
     _menu_sections = {
         {
@@ -462,7 +482,7 @@ void AppSetup::rebuildMenuSections()
                 {fmt::format("WiFi: {}", counter_service::isWifiEnabled() ? "On" : "Off"),
                  [&]() {
                      _destroy_menu = true;
-                     _worker       = std::make_unique<WifiWorker>();
+                     _worker       = std::make_unique<WifiWorker>(_need_warm_reset);
                  }},
                 {fmt::format("MQTT: {}", counter_service::isMqttEnabled() ? "On" : "Off"),
                  [&]() {
