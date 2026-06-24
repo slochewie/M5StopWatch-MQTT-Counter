@@ -52,21 +52,24 @@ idf.py menuconfig
 idf.py build
 ```
 
-The current root `CMakeLists.txt` still declares:
+The root `CMakeLists.txt` now declares:
 
 ```cmake
-project(StopWatch-UserDemo)
+project(StopWatch-MQTT-Counter)
 ```
 
-Because of that inherited project name, the generated application binary is currently named:
+Because of that project name, the generated application binary is now:
 
 ```text
-build/StopWatch-UserDemo.bin
+build/StopWatch-MQTT-Counter.bin
 ```
 
-That name is expected for now and does not mean the Counter firmware failed to build.
+A recent successful build produced:
 
-A recent successful build produced an application binary around `0x2a6500` bytes, with the smallest app partition at `0x4f0000` bytes and about 46% free space remaining.
+```text
+Generated /Users/aaron/M5StopWatch-Counter/build/StopWatch-MQTT-Counter.bin
+StopWatch-MQTT-Counter.bin binary size 0x2946a0 bytes. Smallest app partition is 0x4f0000 bytes. 0x25b960 bytes (48%) free.
+```
 
 ## Flash
 
@@ -78,7 +81,8 @@ A recent successful flash used:
 
 ```text
 Serial port /dev/cu.usbmodem101
-Chip is ESP32-S3 (QFN56)
+Chip is ESP32-S3 (QFN56) (revision v0.2)
+Features: WiFi, BLE, Embedded PSRAM 8MB (AP_3v3)
 USB mode: USB-Serial/JTAG
 Flash size: 16MB
 ```
@@ -131,12 +135,26 @@ Recent flash command shape:
 ```text
 write_flash --flash_mode dio --flash_freq 80m --flash_size 16MB \
   0x0 bootloader/bootloader.bin \
-  0x20000 StopWatch-UserDemo.bin \
+  0x20000 StopWatch-MQTT-Counter.bin \
   0x8000 partition_table/partition-table.bin \
   0xd000 ota_data_initial.bin
 ```
 
 ESP-IDF prints the exact command after a successful build.
+
+## Partition Layout
+
+A recent build generated this partition table:
+
+| Name | Type | Subtype | Offset | Size |
+| --- | --- | --- | --- | --- |
+| `nvs` | data | nvs | `0x9000` | 16K |
+| `otadata` | data | ota | `0xd000` | 8K |
+| `phy_init` | data | phy | `0xf000` | 4K |
+| `ota_0` | app | ota_0 | `0x20000` | 5056K |
+| `ota_1` | app | ota_1 | `0x510000` | 5056K |
+| `storage` | data | fat | `0xa00000` | 4M |
+| `coredump` | data | coredump | `0xe00000` | 64K |
 
 ## Managed Dependencies
 
