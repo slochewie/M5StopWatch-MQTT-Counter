@@ -1,0 +1,6 @@
+id,name,wifi_ssid,wifi_password,mqtt_uri
+home,Home,HomeWiFi,HomePassword,mqtt://home-broker.local:1883
+mccarthys,McCarthy's,McCarthysWiFi,McCarthysPassword,mqtt://mccarthys-broker.local:1883
+library,Library,LibraryWiFi,LibraryPassword,mqtt://library-broker.local:1883
+frog_peach,Frog & Peach,FrogPeachWiFi,FrogPeachPassword,mqtt://frog-peach-broker.local:1883
+bulls,Bull's,BullsWiFi,BullsPassword,mqtt://bulls-broker.local:1883

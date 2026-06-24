@@ -19,8 +19,6 @@
 #include "esp_vfs_fat.h"
 #include "esp_system.h"
 
-#define EXAMPLE_MAX_CHAR_SIZE 128
-
 static const char *TAG = "wear_levelling";
 
 // Handle of the wear levelling library instance
@@ -28,42 +26,6 @@ static wl_handle_t s_wl_handle = WL_INVALID_HANDLE;
 
 // Mount path for the partition
 static const char *base_path = "/spiflash";
-
-static esp_err_t s_example_write_file(char *path, char *data)
-{
-    ESP_LOGI(TAG, "Opening file");
-    FILE *f = fopen(path, "wb");
-    if (f == NULL) {
-        ESP_LOGE(TAG, "Failed to open file for writing");
-        return ESP_FAIL;
-    }
-    fprintf(f, data);
-    fclose(f);
-    ESP_LOGI(TAG, "File written");
-
-    return ESP_OK;
-}
-
-static esp_err_t s_example_read_file(char *path)
-{
-    ESP_LOGI(TAG, "Reading file");
-    FILE *f = fopen(path, "rb");
-    if (f == NULL) {
-        ESP_LOGE(TAG, "Failed to open file for reading");
-        return ESP_FAIL;
-    }
-    char line[EXAMPLE_MAX_CHAR_SIZE];
-    fgets(line, sizeof(line), f);
-    fclose(f);
-    // strip newline
-    char *pos = strchr(line, '\n');
-    if (pos) {
-        *pos = '\0';
-    }
-    ESP_LOGI(TAG, "Read from file: '%s'", line);
-
-    return ESP_OK;
-}
 
 void wear_levelling_init(void)
 {

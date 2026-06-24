@@ -118,12 +118,13 @@ void loadRuntimeConfig()
     s_battery_topic = deriveBatteryTopic(s_counter_topic);
     s_loaded = true;
 
-    ESP_LOGI(TAG, "Loaded config: device=%s, broker=%s, topic=%s, battery=%s, ssid=%s, wifi=%s, mqtt=%s, startup=%s",
+    ESP_LOGI(TAG, "Loaded config: device=%s, broker=%s, topic=%s, battery=%s, ssid=%s, channel=%u, wifi=%s, mqtt=%s, startup=%s",
              s_config.device_name.c_str(),
              s_config.mqtt_uri.c_str(),
              s_counter_topic.c_str(),
              s_battery_topic.c_str(),
              s_config.wifi_ssid.empty() ? "<empty>" : s_config.wifi_ssid.c_str(),
+             static_cast<unsigned>(s_config.wifi_channel),
              s_wifi_enabled ? "on" : "off",
              s_mqtt_enabled ? "on" : "off",
              s_startup_app == StartupApp::Counter ? "counter" : "launcher");
@@ -346,6 +347,7 @@ void begin()
     common::wifi::Config wifi_config = {
         .ssid = s_config.wifi_ssid,
         .password = s_config.wifi_password,
+        .channel = s_config.wifi_channel,
     };
 
     if (!common::wifi::begin(wifi_config)) {
@@ -556,6 +558,14 @@ const char* wifiSsid()
     return s_config.wifi_ssid.empty() ? common::wifi::ssid() : s_config.wifi_ssid.c_str();
 }
 
+uint8_t wifiChannel()
+{
+    if (!s_loaded) {
+        loadRuntimeConfig();
+    }
+    return s_config.wifi_channel;
+}
+
 bool isWifiEnabled()
 {
     if (!s_loaded) {
@@ -597,6 +607,30 @@ void setWifiEnabled(bool enabled, bool saveToSettings)
     if (s_wifi_enabled) {
         begin();
     }
+}
+
+void setWifiChannel(uint8_t channel, bool saveToSettings)
+{
+    if (!s_loaded) {
+        loadRuntimeConfig();
+    }
+
+    if (!(channel == 0 || channel == 1 || channel == 6 || channel == 11)) {
+        channel = 0;
+    }
+
+    if (s_config.wifi_channel == channel) {
+        return;
+    }
+
+    s_config.wifi_channel = channel;
+    s_started = false;
+
+    if (saveToSettings) {
+        device_config::save(s_config);
+    }
+
+    ESP_LOGI(TAG, "Wi-Fi channel setting changed: %u", static_cast<unsigned>(s_config.wifi_channel));
 }
 
 void setMqttEnabled(bool enabled, bool saveToSettings)

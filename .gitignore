@@ -92,4 +92,6 @@ main/secrets.h
 main/secrets.hpp
 main/wifi_config.h
 main/mqtt_config.h
+factory/location_presets.private.csv
+components/location_presets/location_presets_generated.cpp
 apply_safe_wifi_wake_fix.py
