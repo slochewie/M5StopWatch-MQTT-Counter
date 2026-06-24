@@ -52,25 +52,6 @@ idf.py menuconfig
 idf.py build
 ```
 
-The root `CMakeLists.txt` now declares:
-
-```cmake
-project(StopWatch-MQTT-Counter)
-```
-
-Because of that project name, the generated application binary is now:
-
-```text
-build/StopWatch-MQTT-Counter.bin
-```
-
-A recent successful build produced:
-
-```text
-Generated /Users/aaron/M5StopWatch-Counter/build/StopWatch-MQTT-Counter.bin
-StopWatch-MQTT-Counter.bin binary size 0x2946a0 bytes. Smallest app partition is 0x4f0000 bytes. 0x25b960 bytes (48%) free.
-```
-
 ## Flash
 
 ```bash
