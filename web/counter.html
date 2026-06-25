@@ -13,7 +13,6 @@
       --text: #f5f5f7;
       --muted: #8e8e93;
       --blue: #0a84ff;
-      --blue-pressed: #006ee6;
       --green: #30d158;
       --red: #ff453a;
     }
@@ -37,13 +36,14 @@
       display: flex;
       justify-content: center;
       align-items: stretch;
+      overscroll-behavior: none;
     }
 
     .app {
       width: min(100vw, 480px);
       min-height: 100vh;
       min-height: 100dvh;
-      padding: calc(env(safe-area-inset-top) + 58px) 28px calc(env(safe-area-inset-bottom) + 34px);
+      padding: calc(env(safe-area-inset-top) + 46px) 28px calc(env(safe-area-inset-bottom) + 34px);
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -58,8 +58,42 @@
       letter-spacing: -0.055em;
     }
 
+    .location-card {
+      margin-top: 18px;
+      width: 100%;
+      display: grid;
+      gap: 8px;
+      text-align: left;
+    }
+
+    .location-label {
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 650;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    .location-select {
+      width: 100%;
+      height: 48px;
+      border: 1.5px solid var(--panel-border);
+      border-radius: 16px;
+      background: linear-gradient(180deg, #15151b, #0f0f14);
+      color: var(--text);
+      padding: 0 14px;
+      font-size: 1.05rem;
+      font-weight: 650;
+      outline: none;
+    }
+
+    .location-select:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.18);
+    }
+
     #count {
-      margin-top: clamp(76px, 14vh, 120px);
+      margin-top: clamp(48px, 10vh, 86px);
       font-size: clamp(7.5rem, 32vw, 11.5rem);
       line-height: 0.82;
       font-weight: 900;
@@ -67,6 +101,8 @@
       color: var(--text);
       font-variant-numeric: tabular-nums;
       transition: transform 160ms ease, opacity 160ms ease;
+      -webkit-user-select: none;
+      user-select: none;
     }
 
     #count.pulse {
@@ -75,7 +111,7 @@
     }
 
     .reset-row {
-      margin-top: clamp(64px, 9vh, 86px);
+      margin-top: clamp(54px, 8vh, 76px);
       width: 100%;
       display: flex;
       justify-content: center;
@@ -95,7 +131,7 @@
     }
 
     .stepper {
-      margin-top: clamp(56px, 9vh, 86px);
+      margin-top: clamp(48px, 8vh, 76px);
       width: 100%;
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -113,6 +149,15 @@
       font-weight: 300;
       line-height: 1;
       cursor: pointer;
+    }
+
+    .reset-button,
+    .step-button,
+    .location-select {
+      touch-action: manipulation;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
     }
 
     .reset-button:active,
@@ -163,10 +208,11 @@
     }
 
     @media (max-height: 720px) {
-      .app { padding-top: calc(env(safe-area-inset-top) + 34px); }
-      #count { margin-top: 46px; }
-      .reset-row { margin-top: 44px; }
-      .stepper { margin-top: 36px; }
+      .app { padding-top: calc(env(safe-area-inset-top) + 28px); }
+      .location-card { margin-top: 14px; }
+      #count { margin-top: 34px; }
+      .reset-row { margin-top: 38px; }
+      .stepper { margin-top: 30px; }
       .reset-button { height: 58px; }
       .connection { font-size: 1.05rem; }
     }
@@ -176,15 +222,21 @@
 <body>
   <main class="app">
     <h1>Capacity Counter</h1>
+
+    <div class="location-card">
+      <label class="location-label" for="locationSelect">Location</label>
+      <select id="locationSelect" class="location-select"></select>
+    </div>
+
     <div id="count">--</div>
 
     <div class="reset-row">
-      <button class="reset-button" onclick="sendCommand('reset')">Reset</button>
+      <button class="reset-button" type="button" onclick="sendCommand('reset')">Reset</button>
     </div>
 
     <div class="stepper">
-      <button class="step-button" aria-label="Decrement" onclick="sendCommand('decrement')">−</button>
-      <button class="step-button" aria-label="Increment" onclick="sendCommand('increment')">+</button>
+      <button class="step-button" type="button" aria-label="Decrement" onclick="sendCommand('decrement')">−</button>
+      <button class="step-button" type="button" aria-label="Increment" onclick="sendCommand('increment')">+</button>
     </div>
 
     <div id="status" class="connection offline">
@@ -193,42 +245,75 @@
     </div>
 
     <div class="details">
+      <div id="topic">Topic: --</div>
       <div id="updated">Last update: --</div>
       <div id="source">Updated by: --</div>
     </div>
   </main>
 
   <script>
-    const MQTT_HOST = "ws://<mqtt broker ip>:9001";
-    const MQTT_USER = "<mqtt broker user>";
-    const MQTT_PASS = "<mqtt broker password>";
+    const MQTT_HOST = "ws://192.168.111.27:9001";
+    const MQTT_USER = "mqtt_user";
+    const MQTT_PASS = "mqtt_password";
 
-    const STATE_TOPIC = "counters/capacity/state";
-    const COMMAND_TOPIC = "counters/capacity/command";
+    // Add locations here using the same id values generated from
+    // location_presets.private.csv -> components/location_presets/location_presets_generated.cpp.
+    const LOCATIONS = [
+      { id: "home", name: "Home", mqttHost: "ws://192.168.75.61:9001" },
+      { id: "mccarthys", name: "McCarthy's", mqttHost: "ws://192.168.111.27:9001" },
+      { id: "library", name: "Library", mqttHost: "ws://192.168.111.27:9001" },
+      { id: "frog_peach", name: "Frog & Peach", mqttHost: "ws://192.168.111.27:9001" },
+      { id: "bulls", name: "Bull's", mqttHost: "ws://192.168.111.27:9001" }
+    ];
+
+    const DEFAULT_LOCATION_ID = "mccarthys";
+    const STORAGE_KEY = "capacity_counter_location_id";
+
+    let client = null;
+    let activeLocationId = getInitialLocationId();
+    let stateTopic = "";
+    let commandTopic = "";
+    let getTopic = "";
 
     const countEl = document.getElementById("count");
     const statusEl = document.getElementById("status");
     const statusTextEl = statusEl.querySelector(".status-text");
     const updatedEl = document.getElementById("updated");
     const sourceEl = document.getElementById("source");
+    const topicEl = document.getElementById("topic");
+    const locationSelectEl = document.getElementById("locationSelect");
 
-    const client = mqtt.connect(MQTT_HOST, {
+    renderLocationOptions();
+    applyLocation(activeLocationId, false);
+
+    client = mqtt.connect((activeLocation().mqttHost || MQTT_HOST), {
       username: MQTT_USER,
       password: MQTT_PASS,
       reconnectPeriod: 2000,
+      clean: true,
       clientId: "counter_web_" + Math.random().toString(16).slice(2)
     });
 
     client.on("connect", () => {
       statusTextEl.textContent = "Connected";
       statusEl.className = "connection connected";
-      client.subscribe(STATE_TOPIC);
-      client.publish("counters/capacity/get", "web_init");
+      subscribeToActiveLocation();
     });
 
     client.on("message", (topic, message) => {
+      if (topic !== stateTopic) {
+        console.log("Ignoring topic:", topic, message.toString());
+        return;
+      }
+
+      const raw = message.toString();
+
       try {
-        const data = JSON.parse(message.toString());
+        let data = JSON.parse(raw);
+
+        if (typeof data === "number") {
+          data = { value: data, updated_by: "mqtt_numeric" };
+        }
 
         if (data.value !== undefined) {
           countEl.textContent = data.value;
@@ -243,10 +328,19 @@
         }
 
         updatedEl.textContent = "Last update: " + new Date().toLocaleTimeString();
-        sourceEl.textContent = "Updated by: " + (data.updated_by || "--");
+        sourceEl.textContent = "Updated by: " + (data.source || data.updated_by || "--");
 
       } catch (e) {
-        console.error("Bad MQTT payload:", message.toString());
+        const numeric = Number(raw);
+
+        if (Number.isFinite(numeric)) {
+          countEl.textContent = numeric;
+          updatedEl.textContent = "Last update: " + new Date().toLocaleTimeString();
+          sourceEl.textContent = "Updated by: mqtt_numeric";
+          return;
+        }
+
+        console.error("Bad MQTT payload:", raw);
       }
     });
 
@@ -261,12 +355,117 @@
       console.error(err);
     });
 
-    function sendCommand(action) {
-      client.publish(COMMAND_TOPIC, JSON.stringify({
-        action: action,
-        source: "web_page"
+    locationSelectEl.addEventListener("change", () => {
+      applyLocation(locationSelectEl.value, true);
+    });
+
+    function renderLocationOptions() {
+      locationSelectEl.innerHTML = "";
+
+      LOCATIONS.forEach((location) => {
+        const option = document.createElement("option");
+        option.value = location.id;
+        option.textContent = location.name || location.id;
+        locationSelectEl.appendChild(option);
+      });
+
+      locationSelectEl.value = activeLocationId;
+    }
+
+    function getInitialLocationId() {
+      const params = new URLSearchParams(window.location.search);
+      const fromUrl = params.get("location");
+      const fromStorage = localStorage.getItem(STORAGE_KEY);
+      const candidate = fromUrl || fromStorage || DEFAULT_LOCATION_ID;
+
+      return locationExists(candidate) ? candidate : DEFAULT_LOCATION_ID;
+    }
+
+    function locationExists(locationId) {
+      return LOCATIONS.some((location) => location.id === locationId);
+    }
+
+    function activeLocation() {
+      return LOCATIONS.find((location) => location.id === activeLocationId) ||
+             LOCATIONS.find((location) => location.id === DEFAULT_LOCATION_ID) ||
+             LOCATIONS[0];
+    }
+
+    function applyLocation(locationId, persist) {
+      if (!locationExists(locationId)) {
+        locationId = DEFAULT_LOCATION_ID;
+      }
+
+      const previousStateTopic = stateTopic;
+
+      activeLocationId = locationId;
+      stateTopic = `counters/${activeLocationId}/capacity/state`;
+      commandTopic = `counters/${activeLocationId}/capacity/command`;
+      getTopic = `counters/${activeLocationId}/capacity/get`;
+
+      locationSelectEl.value = activeLocationId;
+      topicEl.textContent = "Topic: " + stateTopic;
+      countEl.textContent = "--";
+      updatedEl.textContent = "Last update: --";
+      sourceEl.textContent = "Updated by: --";
+
+      if (persist) {
+        localStorage.setItem(STORAGE_KEY, activeLocationId);
+
+        const url = new URL(window.location.href);
+        url.searchParams.set("location", activeLocationId);
+        window.history.replaceState({}, "", url);
+      }
+
+      if (client && client.connected) {
+        if (previousStateTopic && previousStateTopic !== stateTopic) {
+          client.unsubscribe(previousStateTopic);
+        }
+
+        subscribeToActiveLocation();
+      }
+    }
+
+    function subscribeToActiveLocation() {
+      client.subscribe(stateTopic);
+      client.publish(getTopic, JSON.stringify({
+        source: "web_page",
+        location: activeLocationId
       }));
     }
+
+    function sendCommand(action) {
+      if (!client.connected) {
+        statusTextEl.textContent = "Offline";
+        statusEl.className = "connection offline";
+        return;
+      }
+
+      client.publish(commandTopic, JSON.stringify({
+        action: action,
+        source: "web_page",
+        location: activeLocationId
+      }));
+    }
+
+    // iOS/iPadOS Safari:
+    // Prevent double-tap zoom only on Reset, Decrement, and Increment buttons.
+    // This preserves normal page pinch-to-zoom accessibility.
+    (function preventButtonDoubleTapZoom() {
+      let lastTapTime = 0;
+
+      document.querySelectorAll(".reset-button, .step-button").forEach((button) => {
+        button.addEventListener("touchend", function (event) {
+          const now = Date.now();
+
+          if (now - lastTapTime < 350) {
+            event.preventDefault();
+          }
+
+          lastTapTime = now;
+        }, { passive: false });
+      });
+    })();
   </script>
 </body>
 </html>
