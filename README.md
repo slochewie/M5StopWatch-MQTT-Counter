@@ -150,6 +150,7 @@ See [`docs/architecture.md`](docs/architecture.md) and [`docs/mqtt.md`](docs/mqt
 ## Documentation
 
 - [Architecture](docs/architecture.md)
+- [Wi-Fi Architecture](docs/wifi.md)
 - [MQTT Integration](docs/mqtt.md)
 - [Building and Flashing](docs/building.md)
 - [Power Management](docs/power-management.md)
