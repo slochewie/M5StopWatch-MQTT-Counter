@@ -502,6 +502,12 @@ void AppCounter::createUi()
     lv_obj_set_size(_button_reset, 210, 72);
     lv_obj_align(_button_reset, LV_ALIGN_CENTER, 0, 70);
     lv_obj_set_style_radius(_button_reset, 18, 0);
+    lv_obj_set_style_bg_color(_button_reset, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(_button_reset, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(_button_reset, lv_color_hex(0x2196F3), 0);
+    lv_obj_set_style_border_width(_button_reset, 2, 0);
+    lv_obj_set_style_bg_color(_button_reset, lv_color_hex(0x000000), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(_button_reset, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_add_event_cb(_button_reset, AppCounter::handleResetPressed, LV_EVENT_PRESSED, this);
     lv_obj_add_event_cb(_button_reset, AppCounter::handleResetReleased, LV_EVENT_RELEASED, this);
     lv_obj_add_event_cb(_button_reset, AppCounter::handleResetReleased, LV_EVENT_PRESS_LOST, this);
