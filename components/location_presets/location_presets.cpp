@@ -6,6 +6,8 @@
 #include <nvs.h>
 #include <nvs_flash.h>
 
+#include <string>
+
 namespace location_presets {
 
 // This function is provided by the generated, gitignored file:
@@ -43,6 +45,11 @@ bool ensureNvsReady()
 const Preset* presets(size_t* out_count)
 {
     return generatedPresets(out_count);
+}
+
+std::string counterTopicForPreset(const Preset& preset)
+{
+    return std::string("counters/") + preset.id + "/capacity/state";
 }
 
 void saveSelectedIndex(int index)
@@ -129,7 +136,8 @@ bool apply(size_t index)
         return false;
     }
 
-    if (preset->wifi_ssid == nullptr || preset->wifi_ssid[0] == '\0' ||
+    if (preset->id == nullptr || preset->id[0] == '\0' ||
+        preset->wifi_ssid == nullptr || preset->wifi_ssid[0] == '\0' ||
         preset->mqtt_uri == nullptr || preset->mqtt_uri[0] == '\0') {
         ESP_LOGW(TAG, "Location preset %s is incomplete", preset->name == nullptr ? "<unnamed>" : preset->name);
         return false;
@@ -139,6 +147,7 @@ bool apply(size_t index)
     config.wifi_ssid = preset->wifi_ssid;
     config.wifi_password = preset->wifi_password == nullptr ? "" : preset->wifi_password;
     config.mqtt_uri = preset->mqtt_uri;
+    config.counter_topic = counterTopicForPreset(*preset);
     config.wifi_channel = 0;  // Location selection defaults WiFi channel back to Auto.
 
     if (!device_config::save(config)) {
@@ -147,7 +156,11 @@ bool apply(size_t index)
     }
 
     saveSelectedIndex(static_cast<int>(index));
-    ESP_LOGI(TAG, "Applied location preset: %s", preset->name == nullptr ? "<unnamed>" : preset->name);
+    ESP_LOGI(TAG,
+             "Applied location preset: %s id=%s topic=%s",
+             preset->name == nullptr ? "<unnamed>" : preset->name,
+             preset->id,
+             config.counter_topic.c_str());
     return true;
 }
 
