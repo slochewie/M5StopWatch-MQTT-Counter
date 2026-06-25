@@ -29,13 +29,14 @@ static constexpr const char* SETTINGS_NS = "counter_service";
 static constexpr const char* WIFI_ENABLED_KEY = "wifi_enabled";
 static constexpr const char* MQTT_ENABLED_KEY = "mqtt_enabled";
 static constexpr const char* STARTUP_COUNTER_KEY = "startup_counter";
-static constexpr time_t MIN_VALID_EPOCH = 1700000000;  // 2023-11-14 sanity floor.
+static constexpr time_t MIN_VALID_EPOCH = 1700000000;
 static constexpr uint32_t BATTERY_SKIP_LOG_INTERVAL_MS = 30000;
 static constexpr uint32_t BATTERY_PUBLISH_HEARTBEAT_MS = 300000;
 static constexpr uint8_t BATTERY_UNKNOWN_PERCENT = 0xFF;
 
 device_config::Config s_config;
 std::string s_counter_topic;
+std::string s_command_topic;
 std::string s_battery_topic;
 bool s_loaded = false;
 bool s_started = false;
@@ -48,6 +49,36 @@ portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 uint32_t s_last_battery_skip_log_ms = 0;
 uint32_t s_last_battery_publish_ms = 0;
 uint8_t s_last_battery_publish_percent = BATTERY_UNKNOWN_PERCENT;
+
+std::string replaceSuffix(const std::string& topic, const char* old_suffix, const char* new_suffix)
+{
+    const size_t len = std::strlen(old_suffix);
+    if (topic.size() >= len && topic.compare(topic.size() - len, len, old_suffix) == 0) {
+        return topic.substr(0, topic.size() - len) + new_suffix;
+    }
+    return topic;
+}
+
+std::string deriveCommandTopic(const std::string& state_topic)
+{
+    const auto replaced = replaceSuffix(state_topic, "/state", "/command");
+    return replaced == state_topic ? state_topic + "/command" : replaced;
+}
+
+std::string deriveBatteryTopic(const std::string& state_topic)
+{
+    const char* device = s_config.device_name.empty() ? "m5stopwatch" : s_config.device_name.c_str();
+    static constexpr const char* suffix = "/capacity/state";
+    static constexpr size_t suffix_len = 15;
+
+    if (state_topic.size() >= suffix_len &&
+        state_topic.compare(state_topic.size() - suffix_len, suffix_len, suffix) == 0) {
+        return state_topic.substr(0, state_topic.size() - suffix_len) + "/" + device + "/battery";
+    }
+
+    const auto replaced = replaceSuffix(state_topic, "/state", "/battery");
+    return replaced == state_topic ? state_topic + "/battery" : replaced;
+}
 
 void applyLocalTimezone()
 {
@@ -80,30 +111,13 @@ void saveSettings()
     settings.SetBool(STARTUP_COUNTER_KEY, s_startup_app == StartupApp::Counter);
 }
 
-std::string deriveBatteryTopic(const std::string& counter_topic)
-{
-    static constexpr const char* suffix = "/state";
-    static constexpr size_t suffix_len = 6;
-
-    if (counter_topic.size() >= suffix_len &&
-        counter_topic.compare(counter_topic.size() - suffix_len, suffix_len, suffix) == 0) {
-        return counter_topic.substr(0, counter_topic.size() - suffix_len) + "/battery";
-    }
-
-    if (!counter_topic.empty() && counter_topic.back() == '/') {
-        return counter_topic + "battery";
-    }
-
-    return counter_topic + "/battery";
-}
-
 void loadRuntimeConfig()
 {
     applyLocalTimezone();
     s_config = device_config::load();
     loadSettings();
 
-    auto defaults = device_config::defaults();
+    const auto defaults = device_config::defaults();
     if (s_config.device_name.empty()) {
         s_config.device_name = defaults.device_name;
     }
@@ -115,13 +129,16 @@ void loadRuntimeConfig()
     }
 
     s_counter_topic = s_config.counter_topic;
+    s_command_topic = deriveCommandTopic(s_counter_topic);
     s_battery_topic = deriveBatteryTopic(s_counter_topic);
     s_loaded = true;
 
-    ESP_LOGI(TAG, "Loaded config: device=%s, broker=%s, topic=%s, battery=%s, ssid=%s, channel=%u, wifi=%s, mqtt=%s, startup=%s",
+    ESP_LOGI(TAG,
+             "Loaded config: device=%s, broker=%s, state=%s, command=%s, battery=%s, ssid=%s, channel=%u, wifi=%s, mqtt=%s, startup=%s",
              s_config.device_name.c_str(),
              s_config.mqtt_uri.c_str(),
              s_counter_topic.c_str(),
+             s_command_topic.c_str(),
              s_battery_topic.c_str(),
              s_config.wifi_ssid.empty() ? "<empty>" : s_config.wifi_ssid.c_str(),
              static_cast<unsigned>(s_config.wifi_channel),
@@ -136,6 +153,14 @@ void setLatestValue(int32_t value)
     s_latest_value = value;
     s_has_latest = true;
     portEXIT_CRITICAL(&s_lock);
+}
+
+int32_t latestValueSnapshot()
+{
+    portENTER_CRITICAL(&s_lock);
+    const int32_t value = s_latest_value;
+    portEXIT_CRITICAL(&s_lock);
+    return value;
 }
 
 bool parseCounterPayload(const char* payload, int32_t& value)
@@ -252,12 +277,6 @@ void handleTimeData(const char* payload)
                  local_tm.tm_min,
                  local_tm.tm_sec,
                  getenv("TZ") == nullptr ? "<unset>" : getenv("TZ"));
-    } else {
-        ESP_LOGI(TAG,
-                 "System time synced from %s: epoch=%lld TZ=%s",
-                 TIME_TOPIC,
-                 static_cast<long long>(epoch),
-                 getenv("TZ") == nullptr ? "<unset>" : getenv("TZ"));
     }
 }
 
@@ -274,7 +293,6 @@ void handleMqttMessage(const char* topic, const char* payload, void* user_data)
 
     if (std::strcmp(topic, TIME_TOPIC) == 0) {
         handleTimeData(payload);
-        return;
     }
 }
 
@@ -329,6 +347,20 @@ bool ensureMqttStarted()
     return true;
 }
 
+const char* actionForTargetValue(int32_t value, int32_t current)
+{
+    if (value == 0) {
+        return "reset";
+    }
+    if (value == current + 1) {
+        return "increment";
+    }
+    if (value == current - 1) {
+        return "decrement";
+    }
+    return "set";
+}
+
 }  // namespace
 
 void begin()
@@ -375,21 +407,13 @@ void recoverConnection()
 
     applyNetworkPauseState();
 
-    if (!s_wifi_enabled) {
-        return;
-    }
-
-    if (common::wifi::isRecoveryPaused()) {
+    if (!s_wifi_enabled || common::wifi::isRecoveryPaused()) {
         return;
     }
 
     common::wifi::recoverConnection();
 
-    if (!s_mqtt_enabled) {
-        return;
-    }
-
-    if (!common::wifi::isConnected()) {
+    if (!s_mqtt_enabled || !common::wifi::isConnected()) {
         return;
     }
 
@@ -423,8 +447,8 @@ bool publishValue(int32_t value)
         return false;
     }
 
-    if (s_counter_topic.empty()) {
-        ESP_LOGW(TAG, "Publish skipped, counter topic is empty");
+    if (s_command_topic.empty()) {
+        ESP_LOGW(TAG, "Publish skipped, command topic is empty");
         return false;
     }
 
@@ -432,16 +456,32 @@ bool publishValue(int32_t value)
         value = 0;
     }
 
-    char payload[128];
-    std::snprintf(payload,
-                  sizeof(payload),
-                  "{\"value\":%ld,\"updated_by\":\"%s\"}",
-                  static_cast<long>(value),
-                  s_config.device_name.empty() ? "m5stopwatch" : s_config.device_name.c_str());
+    const int32_t current = latestValueSnapshot();
+    const char* action = actionForTargetValue(value, current);
 
-    const bool ok = common::mqtt::publish(s_counter_topic.c_str(), payload, 1, true);
+    char payload[192];
+    if (std::strcmp(action, "set") == 0) {
+        std::snprintf(payload,
+                      sizeof(payload),
+                      "{\"action\":\"set\",\"value\":%ld,\"source\":\"%s\"}",
+                      static_cast<long>(value),
+                      s_config.device_name.empty() ? "m5stopwatch" : s_config.device_name.c_str());
+    } else {
+        std::snprintf(payload,
+                      sizeof(payload),
+                      "{\"action\":\"%s\",\"source\":\"%s\"}",
+                      action,
+                      s_config.device_name.empty() ? "m5stopwatch" : s_config.device_name.c_str());
+    }
+
+    const bool ok = common::mqtt::publish(s_command_topic.c_str(), payload, 1, false);
     if (ok) {
-        ESP_LOGI(TAG, "Published %s = %ld", s_counter_topic.c_str(), static_cast<long>(value));
+        ESP_LOGI(TAG,
+                 "Published command %s target=%ld current=%ld action=%s",
+                 s_command_topic.c_str(),
+                 static_cast<long>(value),
+                 static_cast<long>(current),
+                 action);
     }
     return ok;
 }
