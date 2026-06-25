@@ -1,1 +1,621 @@
-To be added soon
+[
+    {
+        "id": "543763c5906c5223",
+        "type": "tab",
+        "label": "Capacity Counter + Remote-RED + Multi-Location MQTT",
+        "disabled": false,
+        "info": "Multi-location capacity counter flow. Node-RED is authoritative: devices and Remote-RED publish commands to counters/<location>/capacity/command; Node-RED stores per-location state and publishes retained counters/<location>/capacity/state. Battery topics use counters/<location>/<device>/battery. Legacy single-location behavior defaults to mccarthys where needed."
+    },
+    {
+        "id": "mqtt_broker_main",
+        "type": "mqtt-broker",
+        "name": "McCarthy's Mosquitto",
+        "broker": "192.168.101.31",
+        "port": "1883",
+        "clientid": "node_red_capacity_counter_mccarthys",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "remote_config_capacity",
+        "type": "remote-config",
+        "name": "McCarthy's Capacity Counter Web Page",
+        "host": "192.168.101.31",
+        "protocol": "http",
+        "port": "1880",
+        "baseurl": "/counter.html",
+        "instancehash": "6ls17599bmfhhynf1ejz2v14xrz909egfro1clbx3m9ppsi1yav2wi43un207aby",
+        "server": "nodered03.remote-red.com",
+        "region": "us"
+    },
+    {
+        "id": "8e6a1890f883810d",
+        "type": "comment",
+        "z": "543763c5906c5223",
+        "name": "Multi-location defaults",
+        "info": "Default location fallback is mccarthys. Location-specific MQTT topics use counters/<location>/capacity/command, counters/<location>/capacity/state, and counters/<location>/<device>/battery.",
+        "x": 180,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "970f3b5e66e2cbd9",
+        "type": "mqtt in",
+        "z": "543763c5906c5223",
+        "name": "Counter command wildcard",
+        "topic": "counters/+/capacity/command",
+        "qos": "1",
+        "datatype": "json",
+        "broker": "mqtt_broker_main",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 150,
+        "y": 120,
+        "wires": [
+            [
+                "ce2701389645ccea"
+            ]
+        ]
+    },
+    {
+        "id": "ce2701389645ccea",
+        "type": "function",
+        "z": "543763c5906c5223",
+        "name": "Apply increment/decrement/reset",
+        "func": "// Node-RED is authoritative for counter state.\n// Input topic: counters/<location>/capacity/command\n// Payload examples:\n//   {\"action\":\"increment\",\"source\":\"StopWatch-01\"}\n//   {\"action\":\"decrement\",\"source\":\"StopWatch-01\"}\n//   {\"action\":\"reset\"}\n//   {\"action\":\"set\",\"value\":120}\n\nfunction locationFromMessage(msg, payload) {\n  const parts = String(msg.topic || '').split('/');\n  if (parts.length >= 4 && parts[0] === 'counters' && parts[2] === 'capacity') {\n    return parts[1];\n  }\n  return payload?.location || msg.location || 'mccarthys';\n}\n\nlet payload = msg.payload;\nif (typeof payload === 'string') {\n  try { payload = JSON.parse(payload); }\n  catch (e) { node.warn('Invalid JSON payload'); return null; }\n}\n\nif (!payload || !payload.action) {\n  node.warn('Missing action');\n  return null;\n}\n\nconst location = locationFromMessage(msg, payload);\nconst stateKey = `capacity_counter_${location}`;\n\nlet state = flow.get(stateKey);\nif (typeof state !== 'number') state = 0;\n\nlet action = String(payload.action).trim().toLowerCase();\nif (action === '+1' || action === 'plus' || action === 'inc') action = 'increment';\nif (action === '-1' || action === 'minus' || action === 'dec') action = 'decrement';\n\nif (action === 'increment') {\n  state += 1;\n} else if (action === 'decrement') {\n  state = Math.max(0, state - 1);\n} else if (action === 'reset') {\n  state = 0;\n} else if (action === 'set') {\n  const nextValue = Number(payload.value);\n  if (!Number.isFinite(nextValue)) {\n    node.warn('Invalid set value');\n    return null;\n  }\n  state = Math.max(0, Math.trunc(nextValue));\n} else {\n  node.warn(`Unknown action: ${payload.action}`);\n  return null;\n}\n\nflow.set(stateKey, state);\n\n// Backwards-compatible last active values for dashboard/debug widgets.\nflow.set('capacity_counter', state);\nflow.set('active_location', location);\n\nnode.status({\n  fill: \"green\",\n  shape: \"dot\",\n  text: `${location}: ${state}`\n});\n\nmsg.topic = `counters/${location}/capacity/state`;\nmsg.payload = {\n  value: state,\n  location,\n  updated_by: 'node_red',\n  source: payload.source || payload.updated_by || 'unknown'\n};\nmsg.retain = true;\nmsg.qos = 1;\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 410,
+        "y": 120,
+        "wires": [
+            [
+                "8c7abd0e48b4a36b",
+                "0625c1ac3ade23c3"
+            ]
+        ]
+    },
+    {
+        "id": "8c7abd0e48b4a36b",
+        "type": "mqtt out",
+        "z": "543763c5906c5223",
+        "name": "Publish retained state",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "mqtt_broker_main",
+        "x": 690,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "0625c1ac3ade23c3",
+        "type": "debug",
+        "z": "543763c5906c5223",
+        "name": "Counter state debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload.value",
+        "statusType": "msg",
+        "x": 690,
+        "y": 180,
+        "wires": []
+    },
+    {
+        "id": "274f7b19437c8a4c",
+        "type": "mqtt in",
+        "z": "543763c5906c5223",
+        "name": "State request wildcard",
+        "topic": "counters/+/capacity/get",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "mqtt_broker_main",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 140,
+        "y": 220,
+        "wires": [
+            [
+                "aeb0e9e52313d8c5"
+            ]
+        ]
+    },
+    {
+        "id": "aeb0e9e52313d8c5",
+        "type": "function",
+        "z": "543763c5906c5223",
+        "name": "Publish current state",
+        "func": "// Input topic: counters/<location>/capacity/get\nconst parts = String(msg.topic || '').split('/');\nconst location = (parts.length >= 4 && parts[0] === 'counters' && parts[2] === 'capacity')\n  ? parts[1]\n  : msg.location || msg.payload?.location || 'mccarthys';\n\nconst stateKey = `capacity_counter_${location}`;\nlet state = flow.get(stateKey);\nif (typeof state !== 'number') {\n  state = 0;\n  flow.set(stateKey, state);\n}\n\nflow.set('capacity_counter', state);\nflow.set('active_location', location);\n\nnode.status({\n  fill: \"blue\",\n  shape: \"ring\",\n  text: `${location}: ${state}`\n});\n\nmsg.topic = `counters/${location}/capacity/state`;\nmsg.payload = { value: state, location, updated_by: 'state_request' };\nmsg.retain = true;\nmsg.qos = 1;\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 390,
+        "y": 220,
+        "wires": [
+            [
+                "8c7abd0e48b4a36b"
+            ]
+        ]
+    },
+    {
+        "id": "7961da2294b0dc4e",
+        "type": "inject",
+        "z": "543763c5906c5223",
+        "name": "Initialize state = 0",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "counters/mccarthys/capacity/command",
+        "payload": "{\"action\":\"set\",\"value\":0,\"source\":\"node_red_init\"}",
+        "payloadType": "json",
+        "x": 150,
+        "y": 300,
+        "wires": [
+            [
+                "ce2701389645ccea"
+            ]
+        ]
+    },
+    {
+        "id": "e0b8e5d2047b9834",
+        "type": "inject",
+        "z": "543763c5906c5223",
+        "name": "Reset to 0",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "counters/mccarthys/capacity/command",
+        "payload": "{\"action\":\"reset\",\"source\":\"node_red_reset\"}",
+        "payloadType": "json",
+        "x": 130,
+        "y": 360,
+        "wires": [
+            [
+                "ce2701389645ccea"
+            ]
+        ]
+    },
+    {
+        "id": "95a37392f503f7f7",
+        "type": "remote-access",
+        "z": "543763c5906c5223",
+        "confignode": "remote_config_capacity",
+        "name": "Remote-RED Capacity Counter",
+        "verbose": false,
+        "x": 170,
+        "y": 420,
+        "wires": [
+            [
+                "3d218c5be04028f3"
+            ],
+            [
+                "294855394a113b83"
+            ]
+        ]
+    },
+    {
+        "id": "3d218c5be04028f3",
+        "type": "function",
+        "z": "543763c5906c5223",
+        "name": "Remote-RED action → counter command",
+        "func": "// Remote-RED mobile widgets / iOS shortcuts can emit strings like:\n//   action: increment, decrement, reset\n// Optional location can be provided as msg.payload.location.\n// Default location remains mccarthys.\n\nlet action = undefined;\nlet value = undefined;\nlet location = 'mccarthys';\n\nif (typeof msg.payload === 'string') {\n  action = msg.payload;\n} else if (msg.payload && typeof msg.payload === 'object') {\n  action = msg.payload.action || msg.payload.Action || msg.payload.command || msg.payload.name;\n  value = msg.payload.value;\n  location = msg.payload.location || msg.payload.Location || location;\n}\n\nif (typeof action === 'string') {\n  action = action.trim().toLowerCase();\n}\n\nif (action === '+1' || action === 'plus' || action === 'inc') action = 'increment';\nif (action === '-1' || action === 'minus' || action === 'dec') action = 'decrement';\n\nif (!['increment', 'decrement', 'reset', 'set'].includes(action)) {\n  node.warn('Ignoring Remote-RED action: ' + JSON.stringify(msg.payload));\n  return null;\n}\n\nmsg.topic = `counters/${location}/capacity/command`;\nmsg.payload = {\n  action,\n  location,\n  source: 'remote_red'\n};\n\nif (action === 'set') {\n  msg.payload.value = Number(value);\n}\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 460,
+        "y": 420,
+        "wires": [
+            [
+                "3630405c138c021c",
+                "b497f02b494de4c2"
+            ]
+        ]
+    },
+    {
+        "id": "3630405c138c021c",
+        "type": "mqtt out",
+        "z": "543763c5906c5223",
+        "name": "Publish Remote-RED command",
+        "topic": "",
+        "qos": "1",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "application/json",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "mqtt_broker_main",
+        "x": 760,
+        "y": 420,
+        "wires": []
+    },
+    {
+        "id": "294855394a113b83",
+        "type": "debug",
+        "z": "543763c5906c5223",
+        "name": "Remote-RED raw output",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 450,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "b497f02b494de4c2",
+        "type": "debug",
+        "z": "543763c5906c5223",
+        "name": "Remote-RED command debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload.action",
+        "statusType": "msg",
+        "x": 770,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "comment_stopwatch_sync",
+        "type": "comment",
+        "z": "543763c5906c5223",
+        "name": "External state guard",
+        "info": "Node-RED is authoritative. This flow watches counters/<location>/capacity/state. If a device publishes a non-authoritative state that disagrees with Node-RED's stored value, Node-RED republishes its authoritative retained value.",
+        "x": 180,
+        "y": 560,
+        "wires": []
+    },
+    {
+        "id": "mqtt_in_state_sync",
+        "type": "mqtt in",
+        "z": "543763c5906c5223",
+        "name": "Watch external counter state",
+        "topic": "counters/+/capacity/state",
+        "qos": "1",
+        "datatype": "json",
+        "broker": "mqtt_broker_main",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 170,
+        "y": 620,
+        "wires": [
+            [
+                "fn_sync_external_counter_state"
+            ]
+        ]
+    },
+    {
+        "id": "fn_sync_external_counter_state",
+        "type": "function",
+        "z": "543763c5906c5223",
+        "name": "Guard authoritative state",
+        "func": "// Node-RED authoritative state guard.\n// Watches counters/<location>/capacity/state without letting devices change the stored count.\n// If a non-authoritative publisher overwrites retained state, restore Node-RED's value.\n\nconst parts = String(msg.topic || '').split('/');\nconst location = (parts.length >= 4 && parts[0] === 'counters' && parts[2] === 'capacity')\n  ? parts[1]\n  : 'mccarthys';\n\nlet payload = msg.payload;\nif (typeof payload === 'string') {\n  try {\n    payload = JSON.parse(payload);\n  } catch (e) {\n    const numeric = Number(payload);\n    if (Number.isFinite(numeric)) {\n      payload = { value: numeric, updated_by: 'external_numeric_state' };\n    } else {\n      node.warn('Ignoring non-JSON state payload: ' + payload);\n      return null;\n    }\n  }\n}\n\nlet incomingValue;\nif (typeof payload === 'number') {\n  incomingValue = payload;\n  payload = { value: incomingValue, updated_by: 'external_numeric_state' };\n} else if (payload && typeof payload === 'object' && payload.value !== undefined) {\n  incomingValue = Number(payload.value);\n} else {\n  node.warn('Ignoring state payload without value: ' + JSON.stringify(payload));\n  return null;\n}\n\nif (!Number.isFinite(incomingValue)) {\n  node.warn('Ignoring invalid state value: ' + JSON.stringify(payload));\n  return null;\n}\n\nincomingValue = Math.max(0, Math.trunc(incomingValue));\n\nconst stateKey = `capacity_counter_${location}`;\nlet authoritativeValue = flow.get(stateKey);\nif (typeof authoritativeValue !== 'number') {\n  authoritativeValue = incomingValue;\n  flow.set(stateKey, authoritativeValue);\n}\n\nconst updatedBy = String(payload.updated_by || payload.source || 'external_state');\nconst isNodeRedState = updatedBy === 'node_red' || updatedBy === 'state_request';\n\nnode.status({\n  fill: isNodeRedState ? \"green\" : \"yellow\",\n  shape: isNodeRedState ? \"dot\" : \"ring\",\n  text: `${location}: ${authoritativeValue}`\n});\n\nconst debugMsg = {\n  payload: {\n    location,\n    incoming_value: incomingValue,\n    authoritative_value: authoritativeValue,\n    updated_by: updatedBy,\n    accepted: isNodeRedState\n  }\n};\n\nif (isNodeRedState || incomingValue === authoritativeValue) {\n  return [null, debugMsg];\n}\n\nreturn [\n  {\n    topic: `counters/${location}/capacity/state`,\n    payload: {\n      value: authoritativeValue,\n      location,\n      updated_by: 'node_red',\n      corrected_from: updatedBy\n    },\n    retain: true,\n    qos: 1\n  },\n  debugMsg\n];",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 450,
+        "y": 620,
+        "wires": [
+            [
+                "8c7abd0e48b4a36b"
+            ],
+            [
+                "0625c1ac3ade23c3",
+                "debug_external_counter_sync"
+            ]
+        ]
+    },
+    {
+        "id": "debug_external_counter_sync",
+        "type": "debug",
+        "z": "543763c5906c5223",
+        "name": "StopWatch/state sync debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload.value",
+        "statusType": "msg",
+        "x": 750,
+        "y": 660,
+        "wires": []
+    },
+    {
+        "id": "comment_battery_logic",
+        "type": "comment",
+        "z": "543763c5906c5223",
+        "name": "Per-device MQTT battery logic",
+        "info": "Battery input topic: counters/<location>/<device>/battery. Legacy counters/<device>/battery is still accepted and mapped to location mccarthys. Normalized output is counters/<location>/<device>/battery/normalized. Summary output is counters/<location>/capacity/battery/summary.",
+        "x": 170,
+        "y": 720,
+        "wires": []
+    },
+    {
+        "id": "mqtt_out_battery_normalized",
+        "type": "mqtt out",
+        "z": "543763c5906c5223",
+        "name": "Publish device battery normalized",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "mqtt_broker_main",
+        "x": 700,
+        "y": 760,
+        "wires": []
+    },
+    {
+        "id": "mqtt_in_capacity_battery",
+        "type": "mqtt in",
+        "z": "543763c5906c5223",
+        "name": "Device battery wildcard",
+        "topic": "counters/+/+/battery",
+        "qos": "1",
+        "datatype": "json",
+        "broker": "mqtt_broker_main",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 140,
+        "y": 780,
+        "wires": [
+            [
+                "fn_capacity_battery_state"
+            ]
+        ]
+    },
+    {
+        "id": "fn_capacity_battery_state",
+        "type": "function",
+        "z": "543763c5906c5223",
+        "name": "Normalize/store device battery",
+        "func": "// Input topic examples:\n//   counters/mccarthys/StopWatch-02/battery\n//   counters/mccarthys/M5StickS3-01/battery\n//\n// Legacy accepted:\n//   counters/StopWatch-02/battery  -> location defaults to mccarthys\n//\n// Accepted payload examples:\n//   96\n//   {\"battery\":96}\n//   {\"percent\":96}\n//   {\"value\":96}\n//   {\"battery\":96,\"device\":\"StopWatch-02\"}\n\nconst topicParts = String(msg.topic || '').split('/');\n\nlet location = 'mccarthys';\nlet topicDevice = undefined;\n\nif (topicParts.length >= 4 && topicParts[0] === 'counters' && topicParts[3] === 'battery') {\n  location = topicParts[1];\n  topicDevice = topicParts[2];\n} else if (topicParts.length >= 3 && topicParts[0] === 'counters' && topicParts[2] === 'battery') {\n  topicDevice = topicParts[1];\n}\n\nlet payload = msg.payload;\n\nif (typeof payload === 'string') {\n  try {\n    payload = JSON.parse(payload);\n  } catch (e) {\n    const numeric = Number(payload);\n    if (Number.isFinite(numeric)) {\n      payload = { battery: numeric };\n    } else {\n      node.warn('Ignoring battery payload: ' + payload);\n      return null;\n    }\n  }\n}\n\nif (typeof payload === 'number') {\n  payload = { battery: payload };\n}\n\nif (!payload || typeof payload !== 'object') {\n  node.warn('Ignoring invalid battery payload: ' + JSON.stringify(msg.payload));\n  return null;\n}\n\nlet battery = Number(\n  payload.battery ??\n  payload.percent ??\n  payload.value ??\n  payload.level ??\n  payload.battery_percent\n);\n\nif (!Number.isFinite(battery)) {\n  node.warn('Battery payload missing numeric battery value: ' + JSON.stringify(payload));\n  return null;\n}\n\nbattery = Math.max(0, Math.min(100, Math.round(battery)));\n\nconst device = topicDevice || payload.device || payload.source || 'unknown';\n\nconst normalized = {\n  battery,\n  percent: battery,\n  location,\n  device,\n  source_topic: msg.topic,\n  updated_by: device,\n  ts: Date.now()\n};\n\nlet allBatteryStates = flow.get('battery_states_by_location') || {};\nif (!allBatteryStates[location]) allBatteryStates[location] = {};\nallBatteryStates[location][device] = normalized;\nflow.set('battery_states_by_location', allBatteryStates);\n\n// Backwards-compatible last battery views.\nflow.set('battery_states', allBatteryStates[location]);\nflow.set('capacity_battery', normalized);\n\nnode.status({\n  fill: battery <= 20 ? \"red\" : battery <= 50 ? \"yellow\" : \"green\",\n  shape: \"dot\",\n  text: `${location}/${device}: ${battery}%`\n});\n\nreturn [\n  {\n    topic: `counters/${location}/${device}/battery/normalized`,\n    payload: normalized,\n    retain: true,\n    qos: 1\n  },\n  {\n    topic: `counters/${location}/capacity/battery/summary`,\n    payload: allBatteryStates[location],\n    retain: true,\n    qos: 1\n  },\n  {\n    payload: normalized\n  }\n];",
+        "outputs": 3,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 410,
+        "y": 780,
+        "wires": [
+            [
+                "mqtt_out_battery_normalized"
+            ],
+            [
+                "mqtt_out_battery_summary"
+            ],
+            [
+                "debug_capacity_battery"
+            ]
+        ]
+    },
+    {
+        "id": "debug_capacity_battery",
+        "type": "debug",
+        "z": "543763c5906c5223",
+        "name": "Device battery debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload.battery",
+        "statusType": "msg",
+        "x": 690,
+        "y": 820,
+        "wires": []
+    },
+    {
+        "id": "mqtt_out_battery_summary",
+        "type": "mqtt out",
+        "z": "543763c5906c5223",
+        "name": "Publish battery summary",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "mqtt_broker_main",
+        "x": 700,
+        "y": 820,
+        "wires": []
+    },
+    {
+        "id": "comment_mqtt_time_authority",
+        "type": "comment",
+        "z": "543763c5906c5223",
+        "name": "MQTT time authority for StopWatch RTC sync",
+        "info": "Node-RED publishes retained time so StopWatch devices can set system time after boot and periodically correct drift. Firmware should subscribe to system/time/epoch and call settimeofday() from the received Unix epoch seconds.",
+        "x": 210,
+        "y": 900,
+        "wires": []
+    },
+    {
+        "id": "inject_mqtt_time_every_60s",
+        "type": "inject",
+        "z": "543763c5906c5223",
+        "name": "Publish time every 60s + startup",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "60",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "2",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 180,
+        "y": 960,
+        "wires": [
+            [
+                "fn_build_mqtt_time_messages"
+            ]
+        ]
+    },
+    {
+        "id": "fn_build_mqtt_time_messages",
+        "type": "function",
+        "z": "543763c5906c5223",
+        "name": "Build retained MQTT time messages",
+        "func": "// Publishes retained time for ESP32 / StopWatch devices.\n// system/time/epoch is the important topic for firmware.\n\nconst nowMs = Date.now();\nconst epoch = Math.floor(nowMs / 1000);\nconst iso = new Date(nowMs).toISOString();\n\nnode.status({\n  fill: \"blue\",\n  shape: \"dot\",\n  text: `${epoch}`\n});\n\nreturn [\n  {\n    topic: 'system/time/epoch',\n    payload: epoch,\n    retain: true,\n    qos: 1\n  },\n  {\n    topic: 'system/time/iso',\n    payload: iso,\n    retain: true,\n    qos: 1\n  },\n  {\n    payload: {\n      epoch,\n      iso,\n      topic_epoch: 'system/time/epoch',\n      topic_iso: 'system/time/iso'\n    }\n  }\n];",
+        "outputs": 3,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 450,
+        "y": 960,
+        "wires": [
+            [
+                "mqtt_out_system_time_epoch"
+            ],
+            [
+                "mqtt_out_system_time_iso"
+            ],
+            [
+                "debug_mqtt_time_authority"
+            ]
+        ]
+    },
+    {
+        "id": "mqtt_out_system_time_epoch",
+        "type": "mqtt out",
+        "z": "543763c5906c5223",
+        "name": "Publish retained epoch time",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "mqtt_broker_main",
+        "x": 740,
+        "y": 940,
+        "wires": []
+    },
+    {
+        "id": "mqtt_out_system_time_iso",
+        "type": "mqtt out",
+        "z": "543763c5906c5223",
+        "name": "Publish retained ISO time",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "mqtt_broker_main",
+        "x": 730,
+        "y": 980,
+        "wires": []
+    },
+    {
+        "id": "debug_mqtt_time_authority",
+        "type": "debug",
+        "z": "543763c5906c5223",
+        "name": "MQTT time debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload.epoch",
+        "statusType": "msg",
+        "x": 710,
+        "y": 1020,
+        "wires": []
+    }
+]
