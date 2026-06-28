@@ -147,6 +147,8 @@ bool apply(size_t index)
     config.wifi_ssid = preset->wifi_ssid;
     config.wifi_password = preset->wifi_password == nullptr ? "" : preset->wifi_password;
     config.mqtt_uri = preset->mqtt_uri;
+    config.mqtt_username = preset->mqtt_username == nullptr ? "" : preset->mqtt_username;
+    config.mqtt_password = preset->mqtt_password == nullptr ? "" : preset->mqtt_password;
     config.counter_topic = counterTopicForPreset(*preset);
     config.wifi_channel = 0;  // Location selection defaults WiFi channel back to Auto.
 

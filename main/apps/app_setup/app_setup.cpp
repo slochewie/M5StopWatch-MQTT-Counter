@@ -149,297 +149,685 @@ private:
 class StartupAppWorker : public WorkerBase {
 public:
     StartupAppWorker()
+        : _selected_startup_app(counter_service::getStartupApp())
     {
-        rebuildMenuSections();
-        _menu_page = std::make_unique<view::SelectMenuPage>(_menu_sections);
+        _view = std::make_unique<StartupAppView>(_selected_startup_app);
     }
 
     ~StartupAppWorker() override
     {
-        _menu_sections.clear();
-        _menu_page.reset();
+        _view.reset();
     }
 
     void update() override
     {
-        if (_menu_page) {
-            _menu_page->update();
+        if (!_view) {
+            return;
+        }
+
+        _selected_startup_app = _view->currentStartupApp();
+
+        if (_view->consumeSaveRequested()) {
+            counter_service::setStartupApp(_selected_startup_app, true);
+            _is_done = true;
         }
     }
 
 private:
-    std::vector<view::SelectMenuPage::MenuSection> _menu_sections;
-    std::unique_ptr<view::SelectMenuPage> _menu_page;
+    class StartupAppView {
+    public:
+        explicit StartupAppView(counter_service::StartupApp initialStartupApp)
+            : _current_startup_app(initialStartupApp)
+        {
+            _panel = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Container>(lv_screen_active());
+            _panel->align(LV_ALIGN_CENTER, 0, 0);
+            _panel->setSize(466, 466);
+            _panel->setRadius(0);
+            _panel->setBorderWidth(0);
+            _panel->setPaddingAll(0);
+            _panel->setBgColor(lv_color_hex(0x000000));
+            _panel->setBgOpa(LV_OPA_COVER);
+            _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
 
-    void rebuildMenuSections()
-    {
-        const auto startup_app = counter_service::getStartupApp();
+            createOptionButton(70, counter_service::StartupApp::Counter, "Counter");
+            createOptionButton(205, counter_service::StartupApp::Launcher, "Launcher");
 
-        _menu_sections = {
-            {
-                "Startup App",
-                {
-                    {fmt::format("{} Counter", startup_app == counter_service::StartupApp::Counter ? LV_SYMBOL_OK : "  "),
-                     [this]() {
-                         counter_service::setStartupApp(counter_service::StartupApp::Counter, true);
-                         _is_done = true;
-                     }},
-                    {fmt::format("{} Launcher", startup_app == counter_service::StartupApp::Launcher ? LV_SYMBOL_OK : "  "),
-                     [this]() {
-                         counter_service::setStartupApp(counter_service::StartupApp::Launcher, true);
-                         _is_done = true;
-                     }},
-                },
-            },
-        };
-    }
+            _ok_button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
+            _ok_button->align(LV_ALIGN_CENTER, 0, 175);
+            _ok_button->setSize(374, 130);
+            _ok_button->setRadius(77);
+            _ok_button->setBorderWidth(0);
+            _ok_button->setShadowWidth(0);
+            _ok_button->setBgColor(lv_color_hex(0x4AD78C));
+            _ok_button->label().setText("OK");
+            _ok_button->label().setTextFont(&lv_font_montserrat_28);
+            _ok_button->label().setTextColor(lv_color_hex(0x0F5831));
+            _ok_button->label().align(LV_ALIGN_CENTER, 0, 0);
+            _ok_button->onClick().connect([this]() { _save_requested = true; });
+
+            updateOptionLabels();
+        }
+
+        counter_service::StartupApp currentStartupApp() const
+        {
+            return _current_startup_app;
+        }
+
+        bool consumeSaveRequested()
+        {
+            bool requested  = _save_requested;
+            _save_requested = false;
+            return requested;
+        }
+
+    private:
+        void createOptionButton(int y, counter_service::StartupApp startupApp, const char* label)
+        {
+            auto button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
+            button->align(LV_ALIGN_TOP_MID, 0, y);
+            button->setSize(374, 119);
+            button->setRadius(60);
+            button->setBorderWidth(0);
+            button->setShadowWidth(0);
+            button->setBgColor(lv_color_hex(0x4C4C4C));
+            button->label().setTextFont(&lv_font_montserrat_24);
+            button->label().setTextColor(lv_color_hex(0xFFFFFF));
+            button->label().align(LV_ALIGN_CENTER, 0, 0);
+            button->onClick().connect([this, startupApp]() {
+                _current_startup_app = startupApp;
+                updateOptionLabels();
+            });
+
+            _option_labels.push_back(label);
+            _option_values.push_back(startupApp);
+            _option_buttons.push_back(std::move(button));
+        }
+
+        void updateOptionLabels()
+        {
+            for (size_t i = 0; i < _option_buttons.size(); ++i) {
+                const bool selected = _option_values[i] == _current_startup_app;
+                _option_buttons[i]->label().setText(fmt::format("{}{}", selected ? LV_SYMBOL_OK " " : "", _option_labels[i]).c_str());
+            }
+        }
+
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Container> _panel;
+        std::vector<std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button>> _option_buttons;
+        std::vector<const char*> _option_labels;
+        std::vector<counter_service::StartupApp> _option_values;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button> _ok_button;
+        counter_service::StartupApp _current_startup_app;
+        bool _save_requested = false;
+    };
+
+    counter_service::StartupApp _selected_startup_app;
+    std::unique_ptr<StartupAppView> _view;
 };
+
 
 class LocationWorker : public WorkerBase {
 public:
     explicit LocationWorker(bool& need_warm_reset)
-        : _need_warm_reset(need_warm_reset)
+        : _need_warm_reset(need_warm_reset), _selected_location(location_presets::selectedIndex())
     {
-        rebuildMenuSections();
-        _menu_page = std::make_unique<view::SelectMenuPage>(_menu_sections);
+        _view = std::make_unique<LocationView>(_selected_location);
     }
 
     ~LocationWorker() override
     {
-        _menu_sections.clear();
-        _menu_page.reset();
+        _view.reset();
     }
 
     void update() override
     {
-        if (_menu_page) {
-            _menu_page->update();
+        if (!_view) {
+            return;
+        }
+
+        _selected_location = _view->currentLocationIndex();
+
+        if (_view->consumeSaveRequested()) {
+            if (_selected_location >= 0 && location_presets::apply(static_cast<size_t>(_selected_location))) {
+                _need_warm_reset = true;
+            }
+            _is_done = true;
         }
     }
 
 private:
-    bool& _need_warm_reset;
-    std::vector<view::SelectMenuPage::MenuSection> _menu_sections;
-    std::unique_ptr<view::SelectMenuPage> _menu_page;
+    class LocationView {
+    public:
+        explicit LocationView(int initialLocation)
+            : _current_location(initialLocation)
+        {
+            _panel = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Container>(lv_screen_active());
+            _panel->align(LV_ALIGN_CENTER, 0, 0);
+            _panel->setSize(466, 466);
+            _panel->setRadius(0);
+            _panel->setBorderWidth(0);
+            _panel->setPaddingAll(0);
+            _panel->setBgColor(lv_color_hex(0x000000));
+            _panel->setBgOpa(LV_OPA_COVER);
+            _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
 
-    void rebuildMenuSections()
-    {
-        const int selected_location = location_presets::selectedIndex();
+            _list_container = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Container>(_panel->get());
+            _list_container->align(LV_ALIGN_TOP_MID, 0, 0);
+            _list_container->setSize(466, 326);
+            _list_container->setRadius(0);
+            _list_container->setBorderWidth(0);
+            _list_container->setPaddingAll(0);
+            _list_container->setBgColor(lv_color_hex(0x000000));
+            _list_container->setBgOpa(LV_OPA_COVER);
+            lv_obj_add_flag(_list_container->get(), LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_scroll_dir(_list_container->get(), LV_DIR_VER);
+            lv_obj_set_scrollbar_mode(_list_container->get(), LV_SCROLLBAR_MODE_AUTO);
 
-        view::SelectMenuPage::MenuSection location_section = {
-            "Location",
-            {},
-        };
+            const size_t preset_count = location_presets::count();
+            int button_y = 10;
+            for (size_t i = 0; i < preset_count; ++i) {
+                const auto* preset = location_presets::at(i);
+                if (preset == nullptr || preset->name == nullptr || preset->name[0] == '\0') {
+                    continue;
+                }
 
-        const size_t preset_count = location_presets::count();
-        for (size_t i = 0; i < preset_count; ++i) {
-            const auto* preset = location_presets::at(i);
-            if (preset == nullptr || preset->name == nullptr || preset->name[0] == '\0') {
-                continue;
+                createOptionButton(button_y, static_cast<int>(i), preset->name);
+                button_y += 92;
             }
 
-            const int preset_index = static_cast<int>(i);
-            location_section.items.push_back(
-                {
-                    fmt::format("{} {}", selected_location == preset_index ? LV_SYMBOL_OK : "  ", preset->name),
-                    [this, preset_index]() {
-                        if (location_presets::apply(static_cast<size_t>(preset_index))) {
-                            _need_warm_reset = true;
-                            _is_done = true;
-                        }
-                    },
-                });
+            if (_option_buttons.empty()) {
+                createMessageLabel("No presets generated");
+            }
+
+            _ok_button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
+            _ok_button->align(LV_ALIGN_CENTER, 0, 175);
+            _ok_button->setSize(374, 130);
+            _ok_button->setRadius(77);
+            _ok_button->setBorderWidth(0);
+            _ok_button->setShadowWidth(0);
+            _ok_button->setBgColor(lv_color_hex(0x4AD78C));
+            _ok_button->label().setText("OK");
+            _ok_button->label().setTextFont(&lv_font_montserrat_28);
+            _ok_button->label().setTextColor(lv_color_hex(0x0F5831));
+            _ok_button->label().align(LV_ALIGN_CENTER, 0, 0);
+            _ok_button->onClick().connect([this]() { _save_requested = true; });
+
+            updateOptionLabels();
         }
 
-        if (location_section.items.empty()) {
-            location_section.items.push_back(
-                {
-                    "No presets generated",
-                    [this]() {
-                        _is_done = true;
-                    },
-                });
+        int currentLocationIndex() const
+        {
+            return _current_location;
         }
 
-        _menu_sections = {
-            location_section,
-        };
-    }
+        bool consumeSaveRequested()
+        {
+            bool requested  = _save_requested;
+            _save_requested = false;
+            return requested;
+        }
+
+    private:
+        void createMessageLabel(const char* text)
+        {
+            _message_label = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Label>(_list_container->get());
+            _message_label->setText(text);
+            _message_label->setTextFont(&lv_font_montserrat_24);
+            _message_label->setTextColor(lv_color_hex(0xFFFFFF));
+            _message_label->align(LV_ALIGN_CENTER, 0, -60);
+        }
+
+        void createOptionButton(int y, int locationIndex, const char* label)
+        {
+            auto button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_list_container->get());
+            button->align(LV_ALIGN_TOP_MID, 0, y);
+            button->setSize(374, 82);
+            button->setRadius(41);
+            button->setBorderWidth(0);
+            button->setShadowWidth(0);
+            button->setBgColor(lv_color_hex(0x4C4C4C));
+            button->label().setTextFont(&lv_font_montserrat_20);
+            button->label().setTextColor(lv_color_hex(0xFFFFFF));
+            button->label().align(LV_ALIGN_CENTER, 0, 0);
+            button->onClick().connect([this, locationIndex]() {
+                _current_location = locationIndex;
+                updateOptionLabels();
+            });
+
+            _option_labels.push_back(label);
+            _option_values.push_back(locationIndex);
+            _option_buttons.push_back(std::move(button));
+        }
+
+        void updateOptionLabels()
+        {
+            for (size_t i = 0; i < _option_buttons.size(); ++i) {
+                const bool selected = _option_values[i] == _current_location;
+                _option_buttons[i]->label().setText(fmt::format("{}{}", selected ? LV_SYMBOL_OK " " : "", _option_labels[i]).c_str());
+            }
+        }
+
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Container> _panel;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Container> _list_container;
+        std::vector<std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button>> _option_buttons;
+        std::vector<const char*> _option_labels;
+        std::vector<int> _option_values;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button> _ok_button;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Label> _message_label;
+        int _current_location;
+        bool _save_requested = false;
+    };
+
+    bool& _need_warm_reset;
+    int _selected_location;
+    std::unique_ptr<LocationView> _view;
 };
 
 
 class WifiWorker : public WorkerBase {
 public:
     explicit WifiWorker(bool& need_warm_reset)
-        : _need_warm_reset(need_warm_reset)
+        : _need_warm_reset(need_warm_reset),
+          _selected_wifi_enabled(counter_service::isWifiEnabled()),
+          _selected_wifi_channel(counter_service::wifiChannel())
     {
-        rebuildMenuSections();
-        _menu_page = std::make_unique<view::SelectMenuPage>(_menu_sections);
+        _view = std::make_unique<WifiView>(_selected_wifi_enabled, _selected_wifi_channel);
     }
 
     ~WifiWorker() override
     {
-        _menu_sections.clear();
-        _menu_page.reset();
+        _view.reset();
     }
 
     void update() override
     {
-        if (_menu_page) {
-            _menu_page->update();
+        if (!_view) {
+            return;
+        }
+
+        _selected_wifi_enabled = _view->currentWifiEnabled();
+        _selected_wifi_channel = _view->currentWifiChannel();
+
+        if (_view->consumeSaveRequested()) {
+            counter_service::setWifiEnabled(_selected_wifi_enabled, true);
+            counter_service::setWifiChannel(_selected_wifi_channel, true);
+            _need_warm_reset = true;
+            _is_done = true;
         }
     }
 
 private:
-    std::vector<view::SelectMenuPage::MenuSection> _menu_sections;
-    std::unique_ptr<view::SelectMenuPage> _menu_page;
-    bool& _need_warm_reset;
+    class WifiView {
+    public:
+        WifiView(bool initialWifiEnabled, uint8_t initialWifiChannel)
+            : _current_wifi_enabled(initialWifiEnabled), _current_wifi_channel(initialWifiChannel)
+        {
+            _panel = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Container>(lv_screen_active());
+            _panel->align(LV_ALIGN_CENTER, 0, 0);
+            _panel->setSize(466, 466);
+            _panel->setRadius(0);
+            _panel->setBorderWidth(0);
+            _panel->setPaddingAll(0);
+            _panel->setBgColor(lv_color_hex(0x000000));
+            _panel->setBgOpa(LV_OPA_COVER);
+            _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
 
-    void addChannelItem(std::vector<view::SelectMenuPage::MenuItem>& items, uint8_t channel, const char* label)
-    {
-        const uint8_t selected_channel = counter_service::wifiChannel();
-        items.push_back(
-            {
-                fmt::format("{} {}", selected_channel == channel ? LV_SYMBOL_OK : "  ", label),
-                [this, channel]() {
-                    counter_service::setWifiChannel(channel, true);
-                    _need_warm_reset = true;
-                    _is_done = true;
-                },
+            createWifiButton(-98, 50, true, "On");
+            createWifiButton(98, 50, false, "Off");
+
+            createChannelButton(-98, 145, 0, "Auto");
+            createChannelButton(98, 145, 1, "Ch 1");
+            createChannelButton(-98, 240, 6, "Ch 6");
+            createChannelButton(98, 240, 11, "Ch 11");
+
+            _ok_button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
+            _ok_button->align(LV_ALIGN_CENTER, 0, 175);
+            _ok_button->setSize(374, 130);
+            _ok_button->setRadius(77);
+            _ok_button->setBorderWidth(0);
+            _ok_button->setShadowWidth(0);
+            _ok_button->setBgColor(lv_color_hex(0x4AD78C));
+            _ok_button->label().setText("OK");
+            _ok_button->label().setTextFont(&lv_font_montserrat_28);
+            _ok_button->label().setTextColor(lv_color_hex(0x0F5831));
+            _ok_button->label().align(LV_ALIGN_CENTER, 0, 0);
+            _ok_button->onClick().connect([this]() { _save_requested = true; });
+
+            updateOptionLabels();
+        }
+
+        bool currentWifiEnabled() const
+        {
+            return _current_wifi_enabled;
+        }
+
+        uint8_t currentWifiChannel() const
+        {
+            return _current_wifi_channel;
+        }
+
+        bool consumeSaveRequested()
+        {
+            bool requested  = _save_requested;
+            _save_requested = false;
+            return requested;
+        }
+
+    private:
+        void createWifiButton(int x, int y, bool wifiEnabled, const char* label)
+        {
+            auto button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
+            button->align(LV_ALIGN_TOP_MID, x, y);
+            button->setSize(178, 84);
+            button->setRadius(42);
+            button->setBorderWidth(0);
+            button->setShadowWidth(0);
+            button->setBgColor(lv_color_hex(0x4C4C4C));
+            button->label().setTextFont(&lv_font_montserrat_20);
+            button->label().setTextColor(lv_color_hex(0xFFFFFF));
+            button->label().align(LV_ALIGN_CENTER, 0, 0);
+            button->onClick().connect([this, wifiEnabled]() {
+                _current_wifi_enabled = wifiEnabled;
+                updateOptionLabels();
             });
-    }
 
-    void rebuildMenuSections()
-    {
-        const bool wifi_enabled = counter_service::isWifiEnabled();
-        std::vector<view::SelectMenuPage::MenuItem> items = {
-            {fmt::format("{} On", wifi_enabled ? LV_SYMBOL_OK : "  "),
-             [this]() {
-                 counter_service::setWifiEnabled(true, true);
-                 _is_done = true;
-             }},
-            {fmt::format("{} Off", !wifi_enabled ? LV_SYMBOL_OK : "  "),
-             [this]() {
-                 counter_service::setWifiEnabled(false, true);
-                 _is_done = true;
-             }},
-        };
+            _wifi_labels.push_back(label);
+            _wifi_values.push_back(wifiEnabled);
+            _wifi_buttons.push_back(std::move(button));
+        }
 
-        addChannelItem(items, 0, "Channel: Auto");
-        addChannelItem(items, 1, "Channel: 1");
-        addChannelItem(items, 6, "Channel: 6");
-        addChannelItem(items, 11, "Channel: 11");
+        void createChannelButton(int x, int y, uint8_t channel, const char* label)
+        {
+            auto button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
+            button->align(LV_ALIGN_TOP_MID, x, y);
+            button->setSize(178, 84);
+            button->setRadius(42);
+            button->setBorderWidth(0);
+            button->setShadowWidth(0);
+            button->setBgColor(lv_color_hex(0x4C4C4C));
+            button->label().setTextFont(&lv_font_montserrat_20);
+            button->label().setTextColor(lv_color_hex(0xFFFFFF));
+            button->label().align(LV_ALIGN_CENTER, 0, 0);
+            button->onClick().connect([this, channel]() {
+                _current_wifi_channel = channel;
+                updateOptionLabels();
+            });
 
-        _menu_sections = {
-            {
-                "WiFi",
-                items,
-            },
-        };
-    }
+            _channel_labels.push_back(label);
+            _channel_values.push_back(channel);
+            _channel_buttons.push_back(std::move(button));
+        }
+
+        void updateOptionLabels()
+        {
+            for (size_t i = 0; i < _wifi_buttons.size(); ++i) {
+                const bool selected = _wifi_values[i] == _current_wifi_enabled;
+                _wifi_buttons[i]->label().setText(fmt::format("{}{}", selected ? LV_SYMBOL_OK " " : "", _wifi_labels[i]).c_str());
+            }
+
+            for (size_t i = 0; i < _channel_buttons.size(); ++i) {
+                const bool selected = _channel_values[i] == _current_wifi_channel;
+                _channel_buttons[i]->label().setText(fmt::format("{}{}", selected ? LV_SYMBOL_OK " " : "", _channel_labels[i]).c_str());
+            }
+        }
+
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Container> _panel;
+        std::vector<std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button>> _wifi_buttons;
+        std::vector<const char*> _wifi_labels;
+        std::vector<bool> _wifi_values;
+        std::vector<std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button>> _channel_buttons;
+        std::vector<const char*> _channel_labels;
+        std::vector<uint8_t> _channel_values;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button> _ok_button;
+        bool _current_wifi_enabled;
+        uint8_t _current_wifi_channel;
+        bool _save_requested = false;
+    };
+
+    bool& _need_warm_reset;
+    bool _selected_wifi_enabled;
+    uint8_t _selected_wifi_channel;
+    std::unique_ptr<WifiView> _view;
 };
 
 class MqttWorker : public WorkerBase {
 public:
     MqttWorker()
+        : _selected_mqtt_enabled(counter_service::isMqttEnabled())
     {
-        rebuildMenuSections();
-        _menu_page = std::make_unique<view::SelectMenuPage>(_menu_sections);
+        _view = std::make_unique<MqttView>(_selected_mqtt_enabled);
     }
 
     ~MqttWorker() override
     {
-        _menu_sections.clear();
-        _menu_page.reset();
+        _view.reset();
     }
 
     void update() override
     {
-        if (_menu_page) {
-            _menu_page->update();
+        if (!_view) {
+            return;
+        }
+
+        _selected_mqtt_enabled = _view->currentMqttEnabled();
+
+        if (_view->consumeSaveRequested()) {
+            counter_service::setMqttEnabled(_selected_mqtt_enabled, true);
+            _is_done = true;
         }
     }
 
 private:
-    std::vector<view::SelectMenuPage::MenuSection> _menu_sections;
-    std::unique_ptr<view::SelectMenuPage> _menu_page;
+    class MqttView {
+    public:
+        explicit MqttView(bool initialMqttEnabled)
+            : _current_mqtt_enabled(initialMqttEnabled)
+        {
+            _panel = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Container>(lv_screen_active());
+            _panel->align(LV_ALIGN_CENTER, 0, 0);
+            _panel->setSize(466, 466);
+            _panel->setRadius(0);
+            _panel->setBorderWidth(0);
+            _panel->setPaddingAll(0);
+            _panel->setBgColor(lv_color_hex(0x000000));
+            _panel->setBgOpa(LV_OPA_COVER);
+            _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
 
-    void rebuildMenuSections()
-    {
-        const bool mqtt_enabled = counter_service::isMqttEnabled();
+            createOptionButton(70, true, "On");
+            createOptionButton(205, false, "Off");
 
-        _menu_sections = {
-            {
-                "MQTT",
-                {
-                    {fmt::format("{} On", mqtt_enabled ? LV_SYMBOL_OK : "  "),
-                     [this]() {
-                         counter_service::setMqttEnabled(true, true);
-                         _is_done = true;
-                     }},
-                    {fmt::format("{} Off", !mqtt_enabled ? LV_SYMBOL_OK : "  "),
-                     [this]() {
-                         counter_service::setMqttEnabled(false, true);
-                         _is_done = true;
-                     }},
-                },
-            },
-        };
-    }
+            _ok_button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
+            _ok_button->align(LV_ALIGN_CENTER, 0, 175);
+            _ok_button->setSize(374, 130);
+            _ok_button->setRadius(77);
+            _ok_button->setBorderWidth(0);
+            _ok_button->setShadowWidth(0);
+            _ok_button->setBgColor(lv_color_hex(0x4AD78C));
+            _ok_button->label().setText("OK");
+            _ok_button->label().setTextFont(&lv_font_montserrat_28);
+            _ok_button->label().setTextColor(lv_color_hex(0x0F5831));
+            _ok_button->label().align(LV_ALIGN_CENTER, 0, 0);
+            _ok_button->onClick().connect([this]() { _save_requested = true; });
+
+            updateOptionLabels();
+        }
+
+        bool currentMqttEnabled() const
+        {
+            return _current_mqtt_enabled;
+        }
+
+        bool consumeSaveRequested()
+        {
+            bool requested  = _save_requested;
+            _save_requested = false;
+            return requested;
+        }
+
+    private:
+        void createOptionButton(int y, bool mqttEnabled, const char* label)
+        {
+            auto button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
+            button->align(LV_ALIGN_TOP_MID, 0, y);
+            button->setSize(374, 119);
+            button->setRadius(60);
+            button->setBorderWidth(0);
+            button->setShadowWidth(0);
+            button->setBgColor(lv_color_hex(0x4C4C4C));
+            button->label().setTextFont(&lv_font_montserrat_24);
+            button->label().setTextColor(lv_color_hex(0xFFFFFF));
+            button->label().align(LV_ALIGN_CENTER, 0, 0);
+            button->onClick().connect([this, mqttEnabled]() {
+                _current_mqtt_enabled = mqttEnabled;
+                updateOptionLabels();
+            });
+
+            _option_labels.push_back(label);
+            _option_values.push_back(mqttEnabled);
+            _option_buttons.push_back(std::move(button));
+        }
+
+        void updateOptionLabels()
+        {
+            for (size_t i = 0; i < _option_buttons.size(); ++i) {
+                const bool selected = _option_values[i] == _current_mqtt_enabled;
+                _option_buttons[i]->label().setText(fmt::format("{}{}", selected ? LV_SYMBOL_OK " " : "", _option_labels[i]).c_str());
+            }
+        }
+
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Container> _panel;
+        std::vector<std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button>> _option_buttons;
+        std::vector<const char*> _option_labels;
+        std::vector<bool> _option_values;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button> _ok_button;
+        bool _current_mqtt_enabled;
+        bool _save_requested = false;
+    };
+
+    bool _selected_mqtt_enabled;
+    std::unique_ptr<MqttView> _view;
 };
 
 class ApplianceModeWorker : public WorkerBase {
 public:
     ApplianceModeWorker(bool& setup_appliance_mode, bool& need_warm_reset)
-        : _setup_appliance_mode(setup_appliance_mode), _need_warm_reset(need_warm_reset)
+        : _setup_appliance_mode(setup_appliance_mode), _need_warm_reset(need_warm_reset),
+          _selected_appliance_mode(setup_appliance_mode)
     {
-        rebuildMenuSections();
-        _menu_page = std::make_unique<view::SelectMenuPage>(_menu_sections);
+        _view = std::make_unique<ApplianceModeView>(_selected_appliance_mode);
     }
 
     ~ApplianceModeWorker() override
     {
-        _menu_sections.clear();
-        _menu_page.reset();
+        _view.reset();
     }
 
     void update() override
     {
-        if (_menu_page) {
-            _menu_page->update();
+        if (!_view) {
+            return;
+        }
+
+        _selected_appliance_mode = _view->currentApplianceMode();
+
+        if (_view->consumeSaveRequested()) {
+            _setup_appliance_mode = _selected_appliance_mode;
+            GetHAL().setCounterApplianceMode(_selected_appliance_mode, true);
+            _need_warm_reset = true;
+            _is_done = true;
         }
     }
 
 private:
+    class ApplianceModeView {
+    public:
+        explicit ApplianceModeView(bool initialApplianceMode)
+            : _current_appliance_mode(initialApplianceMode)
+        {
+            _panel = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Container>(lv_screen_active());
+            _panel->align(LV_ALIGN_CENTER, 0, 0);
+            _panel->setSize(466, 466);
+            _panel->setRadius(0);
+            _panel->setBorderWidth(0);
+            _panel->setPaddingAll(0);
+            _panel->setBgColor(lv_color_hex(0x000000));
+            _panel->setBgOpa(LV_OPA_COVER);
+            _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
+
+            createOptionButton(70, true, "On");
+            createOptionButton(205, false, "Off");
+
+            _ok_button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
+            _ok_button->align(LV_ALIGN_CENTER, 0, 175);
+            _ok_button->setSize(374, 130);
+            _ok_button->setRadius(77);
+            _ok_button->setBorderWidth(0);
+            _ok_button->setShadowWidth(0);
+            _ok_button->setBgColor(lv_color_hex(0x4AD78C));
+            _ok_button->label().setText("OK");
+            _ok_button->label().setTextFont(&lv_font_montserrat_28);
+            _ok_button->label().setTextColor(lv_color_hex(0x0F5831));
+            _ok_button->label().align(LV_ALIGN_CENTER, 0, 0);
+            _ok_button->onClick().connect([this]() { _save_requested = true; });
+
+            updateOptionLabels();
+        }
+
+        bool currentApplianceMode() const
+        {
+            return _current_appliance_mode;
+        }
+
+        bool consumeSaveRequested()
+        {
+            bool requested  = _save_requested;
+            _save_requested = false;
+            return requested;
+        }
+
+    private:
+        void createOptionButton(int y, bool applianceMode, const char* label)
+        {
+            auto button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
+            button->align(LV_ALIGN_TOP_MID, 0, y);
+            button->setSize(374, 119);
+            button->setRadius(60);
+            button->setBorderWidth(0);
+            button->setShadowWidth(0);
+            button->setBgColor(lv_color_hex(0x4C4C4C));
+            button->label().setTextFont(&lv_font_montserrat_24);
+            button->label().setTextColor(lv_color_hex(0xFFFFFF));
+            button->label().align(LV_ALIGN_CENTER, 0, 0);
+            button->onClick().connect([this, applianceMode]() {
+                _current_appliance_mode = applianceMode;
+                updateOptionLabels();
+            });
+
+            _option_labels.push_back(label);
+            _option_values.push_back(applianceMode);
+            _option_buttons.push_back(std::move(button));
+        }
+
+        void updateOptionLabels()
+        {
+            for (size_t i = 0; i < _option_buttons.size(); ++i) {
+                const bool selected = _option_values[i] == _current_appliance_mode;
+                _option_buttons[i]->label().setText(fmt::format("{}{}", selected ? LV_SYMBOL_OK " " : "", _option_labels[i]).c_str());
+            }
+        }
+
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Container> _panel;
+        std::vector<std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button>> _option_buttons;
+        std::vector<const char*> _option_labels;
+        std::vector<bool> _option_values;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button> _ok_button;
+        bool _current_appliance_mode;
+        bool _save_requested = false;
+    };
+
     bool& _setup_appliance_mode;
     bool& _need_warm_reset;
-    std::vector<view::SelectMenuPage::MenuSection> _menu_sections;
-    std::unique_ptr<view::SelectMenuPage> _menu_page;
-
-    void rebuildMenuSections()
-    {
-        _menu_sections = {
-            {
-                "Appliance Mode",
-                {
-                    {fmt::format("{} On", _setup_appliance_mode ? LV_SYMBOL_OK : "  "),
-                     [this]() {
-                         _setup_appliance_mode = true;
-                         GetHAL().setCounterApplianceMode(true, true);
-                         _need_warm_reset = true;
-                         _is_done = true;
-                     }},
-                    {fmt::format("{} Off", !_setup_appliance_mode ? LV_SYMBOL_OK : "  "),
-                     [this]() {
-                         _setup_appliance_mode = false;
-                         GetHAL().setCounterApplianceMode(false, true);
-                         _need_warm_reset = true;
-                         _is_done = true;
-                     }},
-                },
-            },
-        };
-    }
+    bool _selected_appliance_mode;
+    std::unique_ptr<ApplianceModeView> _view;
 };
 
 }  // namespace

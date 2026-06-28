@@ -134,6 +134,15 @@ std::string make_ap_ssid()
     return std::string(ssid);
 }
 
+std::string make_default_device_name(std::string_view ap_ssid)
+{
+    constexpr std::string_view prefix = "M5Configure-";
+    if (ap_ssid.rfind(prefix, 0) == 0 && ap_ssid.size() > prefix.size()) {
+        return "M5StopWatch-" + std::string(ap_ssid.substr(prefix.size()));
+    }
+    return "M5StopWatch";
+}
+
 std::string json_escape(std::string_view input)
 {
     std::string out;
@@ -153,10 +162,16 @@ std::string json_escape(std::string_view input)
 
 std::string config_to_json(const device_config::Config& c, std::string_view ap_ssid)
 {
+    auto defaults = device_config::defaults();
+    std::string device_name = c.device_name;
+    if (device_name.empty() || device_name == defaults.device_name) {
+        device_name = make_default_device_name(ap_ssid);
+    }
+
     std::string j = "{";
     j += "\"ap_ssid\":\"" + json_escape(ap_ssid) + "\",";
     j += "\"ap_url\":\"" + std::string(AP_URL) + "\",";
-    j += "\"device_name\":\"" + json_escape(c.device_name) + "\",";
+    j += "\"device_name\":\"" + json_escape(device_name) + "\",";
     j += "\"wifi_ssid\":\"" + json_escape(c.wifi_ssid) + "\",";
     j += "\"wifi_password\":\"" + json_escape(c.wifi_password) + "\",";
     j += "\"mqtt_uri\":\"" + json_escape(c.mqtt_uri) + "\",";
@@ -418,7 +433,10 @@ private:
         cfg.mqtt_password = get_json_string(body, "mqtt_password");
         cfg.counter_topic = get_json_string(body, "counter_topic");
         auto defaults = device_config::defaults();
-        if (cfg.device_name.empty()) cfg.device_name = defaults.device_name;
+        if (cfg.device_name.empty()) {
+            auto* s = self(req);
+            cfg.device_name = make_default_device_name(s ? s->_ssid : "");
+        }
         if (cfg.mqtt_uri.empty()) cfg.mqtt_uri = defaults.mqtt_uri;
         if (cfg.counter_topic.empty()) cfg.counter_topic = defaults.counter_topic;
 

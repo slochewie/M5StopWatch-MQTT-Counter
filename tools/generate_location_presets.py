@@ -6,11 +6,11 @@ preset table into the firmware image.
 
 Expected CSV columns:
 
-    id,name,wifi_ssid,wifi_password,mqtt_uri
+    id,name,wifi_ssid,wifi_password,mqtt_uri,mqtt_username,mqtt_password
 
 Example:
 
-    home,Home,ExampleSSID,ExamplePassword,mqtt://broker.local:1883
+    home,Home,ExampleSSID,ExamplePassword,mqtt://broker.local:1883,mqtt-user,mqtt-password
 
 Default input:
     factory/location_presets.private.csv
@@ -31,6 +31,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT = ROOT / "factory" / "location_presets.private.csv"
 DEFAULT_OUTPUT = ROOT / "components" / "location_presets" / "location_presets_generated.cpp"
 REQUIRED_COLUMNS = ("id", "name", "wifi_ssid", "wifi_password", "mqtt_uri")
+OPTIONAL_COLUMNS = ("mqtt_username", "mqtt_password")
+OUTPUT_COLUMNS = REQUIRED_COLUMNS + OPTIONAL_COLUMNS
 ID_RE = re.compile(r"^[a-z0-9_]+$")
 
 
@@ -72,7 +74,7 @@ def read_presets(path: Path) -> list[dict[str, str]]:
         presets: list[dict[str, str]] = []
         seen_ids: set[str] = set()
         for line_number, row in enumerate(reader, start=2):
-            preset = {column: (row.get(column) or "").strip() for column in REQUIRED_COLUMNS}
+            preset = {column: (row.get(column) or "").strip() for column in OUTPUT_COLUMNS}
 
             if not any(preset.values()):
                 continue
@@ -109,6 +111,8 @@ def render_cpp(presets: list[dict[str, str]], source_path: Path) -> str:
                     cpp_string(preset["wifi_ssid"]),
                     cpp_string(preset["wifi_password"]),
                     cpp_string(preset["mqtt_uri"]),
+                    cpp_string(preset["mqtt_username"]),
+                    cpp_string(preset["mqtt_password"]),
                 ]
             )
             + "},"
