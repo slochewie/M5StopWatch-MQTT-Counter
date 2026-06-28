@@ -48,7 +48,7 @@ The Counter app shows the current count, a long-press reset button, battery leve
 
 The touchscreen reset button is intentionally labeled **HOLD RESET**. A reset is only requested after the reset button is held for approximately two seconds.
 
-![Reset screen](docs/screenshots/reset.svg)
+![Reset screen](docs/screenshots/reset.png)
 
 ## Hardware
 
@@ -143,9 +143,9 @@ See [`docs/architecture.md`](docs/architecture.md) and [`docs/mqtt.md`](docs/mqt
 | --- | --- |
 | Launcher, Counter selected | ![Launcher Counter selected](docs/screenshots/launcher-counter-selected.png) |
 | Counter app | ![Counter app](docs/screenshots/main-screen.svg) |
-| Increment | ![Increment](docs/screenshots/increment.svg) |
-| Decrement | ![Decrement](docs/screenshots/decrement.svg) |
-| Reset | ![Reset](docs/screenshots/reset.svg) |
+| Increment | ![Increment](docs/screenshots/increment.png) |
+| Decrement | ![Decrement](docs/screenshots/decrement.png) |
+| Reset | ![Reset](docs/screenshots/reset.png) |
 
 ## Documentation
 
