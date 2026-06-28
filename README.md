@@ -42,7 +42,7 @@ The Counter app appears in the StopWatch launcher carousel with the AMOLED-optim
 
 The Counter app shows the current count, a long-press reset button, battery level, MQTT connection state, and the active counter topic.
 
-![Main counter screen](docs/screenshots/main-screen.svg)
+![Main counter screen](docs/screenshots/main-screen.png)
 
 ### Reset Protection
 
@@ -142,7 +142,7 @@ See [`docs/architecture.md`](docs/architecture.md) and [`docs/mqtt.md`](docs/mqt
 | Screen | Preview |
 | --- | --- |
 | Launcher, Counter selected | ![Launcher Counter selected](docs/screenshots/launcher-counter-selected.png) |
-| Counter app | ![Counter app](docs/screenshots/main-screen.svg) |
+| Counter app | ![Counter app](docs/screenshots/main-screen.png) |
 | Increment | ![Increment](docs/screenshots/increment.png) |
 | Decrement | ![Decrement](docs/screenshots/decrement.png) |
 | Reset | ![Reset](docs/screenshots/reset.png) |
