@@ -3,8 +3,10 @@
 #include <device_config.h>
 #include <esp_err.h>
 #include <esp_log.h>
+#include <esp_mac.h>
 #include <nvs.h>
 #include <nvs_flash.h>
+#include <cstdio>
 
 #include <string>
 
@@ -50,6 +52,18 @@ const Preset* presets(size_t* out_count)
 std::string counterTopicForPreset(const Preset& preset)
 {
     return std::string("counters/") + preset.id + "/capacity/state";
+}
+
+std::string defaultDeviceNameFromSoftApMac()
+{
+    uint8_t mac[6] = {};
+    if (esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP) != ESP_OK) {
+        return "M5StopWatch";
+    }
+
+    char name[32] = {};
+    std::snprintf(name, sizeof(name), "M5StopWatch-%02X%02X", mac[4], mac[5]);
+    return std::string(name);
 }
 
 void saveSelectedIndex(int index)
@@ -144,6 +158,10 @@ bool apply(size_t index)
     }
 
     device_config::Config config = device_config::load();
+    const auto defaults = device_config::defaults();
+    if (config.device_name.empty() || config.device_name == defaults.device_name) {
+        config.device_name = defaultDeviceNameFromSoftApMac();
+    }
     config.wifi_ssid = preset->wifi_ssid;
     config.wifi_password = preset->wifi_password == nullptr ? "" : preset->wifi_password;
     config.mqtt_uri = preset->mqtt_uri;
