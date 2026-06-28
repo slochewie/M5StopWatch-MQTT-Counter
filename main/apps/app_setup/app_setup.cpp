@@ -471,13 +471,12 @@ private:
             _panel->setBgOpa(LV_OPA_COVER);
             _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
 
-            createWifiButton(-98, 50, true, "On");
-            createWifiButton(98, 50, false, "Off");
+          createWifiSwitchRow(42, "WiFi", _current_wifi_enabled);
 
-            createChannelButton(-98, 145, 0, "Auto");
-            createChannelButton(98, 145, 1, "Ch 1");
-            createChannelButton(-98, 240, 6, "Ch 6");
-            createChannelButton(98, 240, 11, "Ch 11");
+          createChannelButton(-98, 170, 0, "Auto");
+          createChannelButton(98, 170, 1, "Ch 1");
+          createChannelButton(-98, 258, 6, "Ch 6");
+          createChannelButton(98, 258, 11, "Ch 11");
 
             _ok_button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
             _ok_button->align(LV_ALIGN_CENTER, 0, 175);
@@ -513,27 +512,47 @@ private:
         }
 
     private:
-        void createWifiButton(int x, int y, bool wifiEnabled, const char* label)
-        {
-            auto button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
-            button->align(LV_ALIGN_TOP_MID, x, y);
-            button->setSize(178, 84);
-            button->setRadius(42);
-            button->setBorderWidth(0);
-            button->setShadowWidth(0);
-            button->setBgColor(lv_color_hex(0x4C4C4C));
-            button->label().setTextFont(&lv_font_montserrat_20);
-            button->label().setTextColor(lv_color_hex(0xFFFFFF));
-            button->label().align(LV_ALIGN_CENTER, 0, 0);
-            button->onClick().connect([this, wifiEnabled]() {
-                _current_wifi_enabled = wifiEnabled;
-                updateOptionLabels();
-            });
+      void createWifiSwitchRow(int y, const char* title, bool initialValue)
+      {
+          auto row = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Container>(_panel->get());
+          row->setSize(374, 119);
+          row->align(LV_ALIGN_TOP_MID, 0, y);
+          row->setBgColor(lv_color_hex(0x4C4C4C));
+          row->setBorderWidth(0);
+          row->setShadowWidth(0);
+          row->setRadius(60);
+          row->setPaddingAll(0);
+          row->setBgOpa(LV_OPA_COVER);
 
-            _wifi_labels.push_back(label);
-            _wifi_values.push_back(wifiEnabled);
-            _wifi_buttons.push_back(std::move(button));
-        }
+          auto label = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Label>(row->get());
+          label->setText(title);
+          label->setTextFont(&lv_font_montserrat_24);
+          label->setTextColor(lv_color_hex(0xFFFFFF));
+          label->align(LV_ALIGN_LEFT_MID, 36, 0);
+
+          auto switch_widget = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Switch>(row->get());
+          switch_widget->setSize(80, 44);
+          switch_widget->align(LV_ALIGN_RIGHT_MID, -36, 0);
+          switch_widget->setValue(initialValue);
+          switch_widget->setBgColor(lv_color_hex(0x3A3A3A), LV_PART_MAIN);
+          switch_widget->setBgOpa(LV_OPA_COVER, LV_PART_MAIN);
+          switch_widget->setBorderWidth(0, LV_PART_MAIN);
+          switch_widget->setRadius(LV_RADIUS_CIRCLE, LV_PART_MAIN);
+          lv_obj_set_style_bg_color(switch_widget->get(), lv_color_hex(0xFFFFFF), LV_PART_KNOB);
+          lv_obj_set_style_bg_opa(switch_widget->get(), LV_OPA_COVER, LV_PART_KNOB);
+          lv_obj_set_style_border_width(switch_widget->get(), 0, LV_PART_KNOB);
+          lv_obj_set_style_radius(switch_widget->get(), LV_RADIUS_CIRCLE, LV_PART_KNOB);
+          switch_widget->setBgColor(lv_color_hex(0x53BD65), static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | LV_STATE_CHECKED);
+          switch_widget->setBgOpa(LV_OPA_COVER, static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | LV_STATE_CHECKED);
+          switch_widget->setBorderWidth(0, static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | LV_STATE_CHECKED);
+          switch_widget->onValueChanged().connect([this](bool enabled) {
+              _current_wifi_enabled = enabled;
+          });
+
+          _wifi_label = std::move(label);
+          _wifi_switch = std::move(switch_widget);
+          _wifi_row = std::move(row);
+      }
 
         void createChannelButton(int x, int y, uint8_t channel, const char* label)
         {
@@ -559,10 +578,6 @@ private:
 
         void updateOptionLabels()
         {
-            for (size_t i = 0; i < _wifi_buttons.size(); ++i) {
-                const bool selected = _wifi_values[i] == _current_wifi_enabled;
-                _wifi_buttons[i]->label().setText(fmt::format("{}{}", selected ? LV_SYMBOL_OK " " : "", _wifi_labels[i]).c_str());
-            }
 
             for (size_t i = 0; i < _channel_buttons.size(); ++i) {
                 const bool selected = _channel_values[i] == _current_wifi_channel;
@@ -571,9 +586,9 @@ private:
         }
 
         std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Container> _panel;
-        std::vector<std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button>> _wifi_buttons;
-        std::vector<const char*> _wifi_labels;
-        std::vector<bool> _wifi_values;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Container> _wifi_row;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Label> _wifi_label;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Switch> _wifi_switch;
         std::vector<std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button>> _channel_buttons;
         std::vector<const char*> _channel_labels;
         std::vector<uint8_t> _channel_values;
