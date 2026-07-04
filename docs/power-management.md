@@ -6,14 +6,47 @@ Power management is active development. The project now has a system-level sleep
 
 The sleep manager tracks user activity, device orientation, display standby, network pause/resume, and the ESP32-S3 deep-sleep target.
 
-Current thresholds:
+The current default thresholds are:
 
-| Idle condition | Behavior |
+| Idle condition | Default behavior |
 | --- | --- |
-| 10 seconds idle while hanging | Display/network standby. |
-| 30 seconds idle while hanging | ESP32-S3 native deep sleep target. |
+| 15 seconds idle while hanging | Soft Sleep / display-network standby. |
+| 45 seconds idle while hanging | Deep Sleep / ESP32-S3 native deep sleep target. |
+
+Both thresholds are configurable from the Settings app under **Device → Wake Settings**.
 
 Both thresholds require the device to be in the lanyard-hanging orientation. If the device is not hanging, the sleep manager treats that as active/handheld use and keeps the display/network awake.
+
+## Wake Settings
+
+The Settings app exposes two independent timeout controls:
+
+| Setting | Meaning |
+| --- | --- |
+| Soft Sleep | Display/network standby timeout. |
+| Deep Sleep | ESP32-S3 native deep-sleep timeout. |
+
+Soft Sleep choices:
+
+- Never
+- 15 seconds
+- 30 seconds
+- 45 seconds
+- 1 minute
+- 2 minutes
+
+Deep Sleep choices:
+
+- Never
+- 30 seconds
+- 45 seconds
+- 1 minute
+- 2 minutes
+- 5 minutes
+- 10 minutes
+- 30 minutes
+
+Selecting **Never** disables that sleep stage by saving a timeout value of `0`. Settings are saved to NVS and reloaded by the sleep manager at startup.
 
 ## Hanging Orientation Gate
 
@@ -27,9 +60,9 @@ Current hanging check:
 
 This matches the intended physical behavior: the StopWatch may hang vertically from a lanyard when idle, but should remain awake during normal handheld use.
 
-## 10-Second Display/Network Standby
+## Soft Sleep / Display-Network Standby
 
-After the standby threshold is reached while hanging, the firmware:
+After the configured Soft Sleep threshold is reached while hanging, the firmware:
 
 - Saves the current brightness.
 - Sets the backlight brightness to zero.
@@ -42,13 +75,13 @@ Standby wake behavior:
 
 - Touch wakes display/network standby.
 - Physical button activity wakes display/network standby.
-- Motion/orientation alone does not wake the 10-second standby state.
+- Motion/orientation alone does not wake the standby state.
 
 Network recovery remains deferred until needed after wake.
 
-## 30-Second ESP32-S3 Deep Sleep
+## Deep Sleep / ESP32-S3 Deep Sleep
 
-After the deeper timeout is reached while hanging, the firmware enters native ESP32-S3 deep sleep.
+After the configured Deep Sleep threshold is reached while hanging, the firmware enters native ESP32-S3 deep sleep.
 
 Current deep-sleep target:
 
@@ -101,6 +134,6 @@ Additional power-saving behavior comes from:
 
 - Continue tuning hanging and handheld orientation thresholds.
 - Improve wake behavior for real venue/lanyard use.
-- Validate battery runtime in standby and deep sleep.
+- Validate battery runtime across each configurable sleep option.
 - Evaluate deeper PMIC-assisted sleep modes after L2 behavior is stable.
 - Document final user-facing sleep/wake behavior after field testing.
