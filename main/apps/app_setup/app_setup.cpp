@@ -28,6 +28,189 @@ bool s_setup_appliance_mode = true;
 
 bool s_setup_portal_active = false;
 
+struct WakeTimeoutOption {
+    uint32_t ms;
+    const char* label;
+};
+
+static constexpr WakeTimeoutOption kSoftSleepOptions[] = {
+    {0, "Never"},
+    {15000, "15 seconds"},
+    {30000, "30 seconds"},
+    {45000, "45 seconds"},
+    {60000, "1 minute"},
+    {120000, "2 minutes"},
+};
+
+static constexpr WakeTimeoutOption kDeepSleepOptions[] = {
+    {0, "Never"},
+    {30000, "30 seconds"},
+    {45000, "45 seconds"},
+    {60000, "1 minute"},
+    {120000, "2 minutes"},
+    {300000, "5 minutes"},
+    {600000, "10 minutes"},
+    {1800000, "30 minutes"},
+};
+
+size_t wakeOptionIndexForMs(const WakeTimeoutOption* options, size_t count, uint32_t ms, size_t fallbackIndex)
+{
+    for (size_t i = 0; i < count; ++i) {
+        if (options[i].ms == ms) {
+            return i;
+        }
+    }
+    return fallbackIndex;
+}
+class WakeSettingsWorker : public WorkerBase {
+public:
+    WakeSettingsWorker()
+        : _selected_soft_sleep_ms(sleep_manager::softSleepTimeoutMs()),
+          _selected_deep_sleep_ms(sleep_manager::deepSleepTimeoutMs())
+    {
+        _view = std::make_unique<WakeSettingsView>(_selected_soft_sleep_ms, _selected_deep_sleep_ms);
+    }
+
+    ~WakeSettingsWorker() override
+    {
+        _view.reset();
+    }
+
+    void update() override
+    {
+        if (!_view) {
+            return;
+        }
+
+        _selected_soft_sleep_ms = _view->currentSoftSleepMs();
+        _selected_deep_sleep_ms = _view->currentDeepSleepMs();
+
+        if (_view->consumeSaveRequested()) {
+            sleep_manager::setSoftSleepTimeoutMs(_selected_soft_sleep_ms, true);
+            sleep_manager::setDeepSleepTimeoutMs(_selected_deep_sleep_ms, true);
+            _is_done = true;
+        }
+    }
+
+private:
+    class WakeSettingsView {
+    public:
+        WakeSettingsView(uint32_t initialSoftSleepMs, uint32_t initialDeepSleepMs)
+            : _soft_sleep_index(wakeOptionIndexForMs(kSoftSleepOptions,
+                                                     sizeof(kSoftSleepOptions) / sizeof(kSoftSleepOptions[0]),
+                                                     initialSoftSleepMs,
+                                                     1)),
+              _deep_sleep_index(wakeOptionIndexForMs(kDeepSleepOptions,
+                                                     sizeof(kDeepSleepOptions) / sizeof(kDeepSleepOptions[0]),
+                                                     initialDeepSleepMs,
+                                                     2))
+        {
+            _panel = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Container>(lv_screen_active());
+            _panel->align(LV_ALIGN_CENTER, 0, 0);
+            _panel->setSize(466, 466);
+            _panel->setRadius(0);
+            _panel->setBorderWidth(0);
+            _panel->setPaddingAll(0);
+            _panel->setBgColor(lv_color_hex(0x000000));
+            _panel->setBgOpa(LV_OPA_COVER);
+            _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
+
+            _title_label = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Label>(_panel->get());
+            _title_label->setText("Wake Settings");
+            _title_label->setTextFont(&lv_font_montserrat_28);
+            _title_label->setTextColor(lv_color_hex(0xFFFFFF));
+            _title_label->align(LV_ALIGN_TOP_MID, 0, 34);
+
+            createSoftSleepButton(105);
+            createDeepSleepButton(225);
+
+            _ok_button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
+            _ok_button->align(LV_ALIGN_CENTER, 0, 175);
+            _ok_button->setSize(374, 100);
+            _ok_button->setRadius(50);
+            _ok_button->setBorderWidth(0);
+            _ok_button->setShadowWidth(0);
+            _ok_button->setBgColor(lv_color_hex(0x4AD78C));
+            _ok_button->label().setText("OK");
+            _ok_button->label().setTextFont(&lv_font_montserrat_28);
+            _ok_button->label().setTextColor(lv_color_hex(0x0F5831));
+            _ok_button->label().align(LV_ALIGN_CENTER, 0, 0);
+            _ok_button->onClick().connect([this]() { _save_requested = true; });
+
+            updateLabels();
+        }
+
+        uint32_t currentSoftSleepMs() const
+        {
+            return kSoftSleepOptions[_soft_sleep_index].ms;
+        }
+
+        uint32_t currentDeepSleepMs() const
+        {
+            return kDeepSleepOptions[_deep_sleep_index].ms;
+        }
+
+        bool consumeSaveRequested()
+        {
+            bool requested  = _save_requested;
+            _save_requested = false;
+            return requested;
+        }
+
+    private:
+        void createSoftSleepButton(int y)
+        {
+            _soft_sleep_button = createOptionButton(y, [this]() {
+                _soft_sleep_index = (_soft_sleep_index + 1) % (sizeof(kSoftSleepOptions) / sizeof(kSoftSleepOptions[0]));
+                updateLabels();
+            });
+        }
+
+        void createDeepSleepButton(int y)
+        {
+            _deep_sleep_button = createOptionButton(y, [this]() {
+                _deep_sleep_index = (_deep_sleep_index + 1) % (sizeof(kDeepSleepOptions) / sizeof(kDeepSleepOptions[0]));
+                updateLabels();
+            });
+        }
+
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button> createOptionButton(int y, std::function<void()> onClick)
+        {
+            auto button = std::make_unique<smooth_ui_toolkit::lvgl_cpp::Button>(_panel->get());
+            button->align(LV_ALIGN_TOP_MID, 0, y);
+            button->setSize(374, 104);
+            button->setRadius(52);
+            button->setBorderWidth(0);
+            button->setShadowWidth(0);
+            button->setBgColor(lv_color_hex(0x4C4C4C));
+            button->label().setTextFont(&lv_font_montserrat_22);
+            button->label().setTextColor(lv_color_hex(0xFFFFFF));
+            button->label().align(LV_ALIGN_CENTER, 0, 0);
+            button->onClick().connect(std::move(onClick));
+            return button;
+        }
+
+        void updateLabels()
+        {
+            _soft_sleep_button->label().setText(fmt::format("Soft Sleep\n> {}", kSoftSleepOptions[_soft_sleep_index].label).c_str());
+            _deep_sleep_button->label().setText(fmt::format("Deep Sleep\n> {}", kDeepSleepOptions[_deep_sleep_index].label).c_str());
+        }
+
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Container> _panel;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Label> _title_label;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button> _soft_sleep_button;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button> _deep_sleep_button;
+        std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Button> _ok_button;
+        size_t _soft_sleep_index;
+        size_t _deep_sleep_index;
+        bool _save_requested = false;
+    };
+
+    uint32_t _selected_soft_sleep_ms;
+    uint32_t _selected_deep_sleep_ms;
+    std::unique_ptr<WakeSettingsView> _view;
+};
+
 void resumeWifiRecoveryIfAwake()
 {
     if (sleep_manager::isSleeping()) {
@@ -880,6 +1063,11 @@ void AppSetup::rebuildMenuSections()
                  [&]() {
                      _destroy_menu = true;
                      _worker       = std::make_unique<ButtonWorker>();
+                 }},
+                {"Wake Settings",
+                 [&]() {
+                     _destroy_menu = true;
+                     _worker       = std::make_unique<WakeSettingsWorker>();
                  }},
                 {fmt::format("WiFi: {}", counter_service::isWifiEnabled() ? "On" : "Off"),
                  [&]() {

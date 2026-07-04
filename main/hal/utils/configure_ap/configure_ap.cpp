@@ -24,6 +24,7 @@
 #include <esp_log.h>
 #include <esp_mac.h>
 #include <esp_netif.h>
+#include <esp_ota_ops.h>
 #include <esp_system.h>
 #include <esp_timer.h>
 #include <esp_wifi.h>
@@ -43,6 +44,7 @@ constexpr EventBits_t EXIT_BIT = BIT0;
 constexpr EventBits_t MQTT_TEST_CONNECTED_BIT = BIT0;
 constexpr EventBits_t MQTT_TEST_ERROR_BIT = BIT1;
 constexpr const char* JSON_TYPE = "application/json";
+constexpr size_t OTA_RECV_CHUNK_SIZE = 4096;
 extern const char configure_ap_html_start[] asm("_binary_configure_ap_html_start");
 extern const char configure_ap_html_end[] asm("_binary_configure_ap_html_end");
 
@@ -313,10 +315,10 @@ private:
     bool start_server()
     {
         httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-        config.max_uri_handlers = 18;
+        config.max_uri_handlers = 19;
         config.uri_match_fn = httpd_uri_match_wildcard;
-        config.recv_wait_timeout = 15;
-        config.send_wait_timeout = 15;
+        config.recv_wait_timeout = 30;
+        config.send_wait_timeout = 30;
         esp_err_t ret = httpd_start(&_server, &config);
         if (ret != ESP_OK) {
             log("Failed to start web server");
@@ -327,6 +329,7 @@ private:
         httpd_uri_t config_post = {.uri = "/config", .method = HTTP_POST, .handler = &Session::handle_config_post, .user_ctx = this};
         httpd_uri_t mqtt_test = {.uri = "/mqtt/test", .method = HTTP_POST, .handler = &Session::handle_mqtt_test, .user_ctx = this};
         httpd_uri_t scan = {.uri = "/wifi/scan", .method = HTTP_GET, .handler = &Session::handle_wifi_scan, .user_ctx = this};
+        httpd_uri_t ota = {.uri = "/ota", .method = HTTP_POST, .handler = &Session::handle_ota_upload, .user_ctx = this};
         httpd_uri_t close = {.uri = "/close", .method = HTTP_POST, .handler = &Session::handle_close, .user_ctx = this};
         httpd_uri_t reboot = {.uri = "/reboot", .method = HTTP_POST, .handler = &Session::handle_reboot, .user_ctx = this};
         httpd_uri_t captive = {.uri = nullptr, .method = HTTP_GET, .handler = &Session::handle_captive, .user_ctx = this};
@@ -335,6 +338,7 @@ private:
         if (ret == ESP_OK) ret = httpd_register_uri_handler(_server, &config_post);
         if (ret == ESP_OK) ret = httpd_register_uri_handler(_server, &mqtt_test);
         if (ret == ESP_OK) ret = httpd_register_uri_handler(_server, &scan);
+        if (ret == ESP_OK) ret = httpd_register_uri_handler(_server, &ota);
         if (ret == ESP_OK) ret = httpd_register_uri_handler(_server, &close);
         if (ret == ESP_OK) ret = httpd_register_uri_handler(_server, &reboot);
         if (ret == ESP_OK) {
@@ -538,6 +542,81 @@ private:
         }
         json += "]}";
         send_json(req, json);
+        return ESP_OK;
+    }
+
+    static esp_err_t handle_ota_upload(httpd_req_t* req)
+    {
+        if (req->content_len <= 0) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing firmware body");
+            return ESP_FAIL;
+        }
+
+        const esp_partition_t* update_partition = esp_ota_get_next_update_partition(nullptr);
+        if (update_partition == nullptr) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no OTA partition available");
+            return ESP_FAIL;
+        }
+
+        if (static_cast<size_t>(req->content_len) > update_partition->size) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "firmware is larger than OTA partition");
+            return ESP_FAIL;
+        }
+
+        ESP_LOGI(TAG, "OTA upload started: %d bytes to %s", req->content_len, update_partition->label);
+
+        esp_ota_handle_t ota_handle = 0;
+        esp_err_t err = esp_ota_begin(update_partition, req->content_len, &ota_handle);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA begin failed");
+            return ESP_FAIL;
+        }
+
+        std::vector<uint8_t> buffer(OTA_RECV_CHUNK_SIZE);
+        int remaining = req->content_len;
+        while (remaining > 0) {
+            const int to_read = std::min<int>(remaining, static_cast<int>(buffer.size()));
+            int received = httpd_req_recv(req, reinterpret_cast<char*>(buffer.data()), to_read);
+            if (received <= 0) {
+                if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+                    continue;
+                }
+                ESP_LOGE(TAG, "OTA receive failed: %d", received);
+                esp_ota_abort(ota_handle);
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA receive failed");
+                return ESP_FAIL;
+            }
+
+            err = esp_ota_write(ota_handle, buffer.data(), received);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
+                esp_ota_abort(ota_handle);
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA write failed");
+                return ESP_FAIL;
+            }
+
+            remaining -= received;
+        }
+
+        err = esp_ota_end(ota_handle);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "OTA image validation failed");
+            return ESP_FAIL;
+        }
+
+        err = esp_ota_set_boot_partition(update_partition);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA boot partition failed");
+            return ESP_FAIL;
+        }
+
+        ESP_LOGI(TAG, "OTA upload complete; rebooting into %s", update_partition->label);
+        httpd_resp_sendstr(req, "Firmware uploaded. Rebooting into updated firmware...");
+        vTaskDelay(pdMS_TO_TICKS(750));
+        esp_restart();
         return ESP_OK;
     }
 

@@ -44,6 +44,10 @@ select {
   font-size: 16px;
 }
 
+input[type="file"] {
+  padding: 10px;
+}
+
 button {
   border: 0;
   border-radius: 12px;
@@ -215,6 +219,15 @@ input:checked + .slider:before {
       <p>Changes will take effect after reboot.</p>
       <button type="button" class="danger" id="reboot">Reboot Device</button>
     </div>
+
+    <div class="card">
+      <h2>Firmware Update</h2>
+      <p class="hint">Upload the application firmware binary from the build folder.</p>
+      <label>Firmware .bin</label>
+      <input id="firmware" type="file" accept=".bin,application/octet-stream">
+      <div class="hint">Use build/StopWatch-MQTT-Counter.bin only. Do not upload bootloader.bin, partition-table.bin, or ota_data_initial.bin.</div>
+      <button type="button" class="danger" id="ota_upload">Upload Firmware</button>
+    </div>
   </main>
 
   <script>
@@ -349,11 +362,51 @@ async function reboot() {
   await fetch('/reboot', {method: 'POST'});
 }
 
+async function uploadFirmware() {
+  const fileInput = el('firmware');
+  const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+
+  if (!file) {
+    st('Choose build/StopWatch-MQTT-Counter.bin first.');
+    return;
+  }
+
+  if (!file.name.endsWith('.bin')) {
+    st('Firmware file must be a .bin file.');
+    return;
+  }
+
+  if (file.name === 'bootloader.bin' || file.name === 'partition-table.bin' || file.name === 'ota_data_initial.bin') {
+    st('Wrong file. Upload build/StopWatch-MQTT-Counter.bin only.');
+    return;
+  }
+
+  const ok = confirm('Upload firmware and reboot the device?');
+  if (!ok) {
+    return;
+  }
+
+  st('Uploading firmware. Keep this page open and stay connected to the AP...');
+
+  try {
+    const r = await fetch('/ota', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/octet-stream'},
+      body: file
+    });
+
+    st(await r.text());
+  } catch (e) {
+    st('Upload interrupted: ' + e);
+  }
+}
+
 el('form').addEventListener('submit', save);
 el('reload').addEventListener('click', load);
 el('scan').addEventListener('click', scan);
 el('mqtt_test').addEventListener('click', testMqtt);
 el('reboot').addEventListener('click', reboot);
+el('ota_upload').addEventListener('click', uploadFirmware);
 
 el('ssid_select').addEventListener('change', () => {
   if (el('ssid_select').value) {

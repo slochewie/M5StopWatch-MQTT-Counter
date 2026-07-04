@@ -17,6 +17,12 @@ bool isSleeping();
 
 void markActivity();
 void wake();
+
+uint32_t softSleepTimeoutMs();
+uint32_t deepSleepTimeoutMs();
+void setSoftSleepTimeoutMs(uint32_t timeout_ms, bool save = true);
+void setDeepSleepTimeoutMs(uint32_t timeout_ms, bool save = true);
+
 void requestNetworkResume();
 
 }  // namespace sleep_manager

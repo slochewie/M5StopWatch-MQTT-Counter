@@ -6,6 +6,7 @@
 #include "sleep_manager.h"
 
 #include "esp_sleep.h"
+#include "nvs.h"
 #include <hal/hal.h>
 #include <apps/common/network/wifi_service.h>
 #include <apps/common/network/mqtt_service.h>
@@ -38,8 +39,11 @@ namespace {
 
 static constexpr const char* TAG = "SleepManager";
 
-static constexpr uint32_t DISPLAY_STANDBY_TIMEOUT_MS = 10000;
-static constexpr uint32_t DEEP_SLEEP_TIMEOUT_MS = 30000;
+static constexpr uint32_t DEFAULT_DISPLAY_STANDBY_TIMEOUT_MS = 15000;
+static constexpr uint32_t DEFAULT_DEEP_SLEEP_TIMEOUT_MS = 45000;
+static constexpr const char* NVS_NAMESPACE = "sleep_mgr";
+static constexpr const char* NVS_KEY_SOFT_SLEEP_MS = "soft_ms";
+static constexpr const char* NVS_KEY_DEEP_SLEEP_MS = "deep_ms";
 static constexpr uint32_t IMU_SAMPLE_INTERVAL_MS = 100;
 static constexpr uint32_t POST_SLEEP_WAKE_LOCKOUT_MS = 1200;
 static constexpr uint32_t PMG0_SAMPLE_INTERVAL_MS = 100;
@@ -63,6 +67,8 @@ bool s_display_standby = false;
 uint32_t s_last_activity_ms = 0;
 uint32_t s_last_imu_sample_ms = 0;
 uint32_t s_sleep_entered_ms = 0;
+uint32_t s_soft_sleep_timeout_ms = DEFAULT_DISPLAY_STANDBY_TIMEOUT_MS;
+uint32_t s_deep_sleep_timeout_ms = DEFAULT_DEEP_SLEEP_TIMEOUT_MS;
 
 int s_saved_brightness = 80;
 
@@ -75,6 +81,66 @@ uint32_t s_last_pmg0_sample_ms = 0;
 uint8_t s_pmg0_wake_confirm_count = 0;
 bool s_motion_wake_candidate = false;
 uint32_t s_motion_wake_candidate_ms = 0;
+
+void loadTimeoutSettings()
+{
+    nvs_handle_t handle = 0;
+    const esp_err_t open_err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (open_err != ESP_OK) {
+        s_soft_sleep_timeout_ms = DEFAULT_DISPLAY_STANDBY_TIMEOUT_MS;
+        s_deep_sleep_timeout_ms = DEFAULT_DEEP_SLEEP_TIMEOUT_MS;
+        return;
+    }
+
+    uint32_t soft_ms = DEFAULT_DISPLAY_STANDBY_TIMEOUT_MS;
+    uint32_t deep_ms = DEFAULT_DEEP_SLEEP_TIMEOUT_MS;
+
+    const esp_err_t soft_err = nvs_get_u32(handle, NVS_KEY_SOFT_SLEEP_MS, &soft_ms);
+    if (soft_err != ESP_OK && soft_err != ESP_ERR_NVS_NOT_FOUND) {
+        mclog::tagWarn(TAG, "failed to read soft sleep timeout: {}", esp_err_to_name(soft_err));
+        soft_ms = DEFAULT_DISPLAY_STANDBY_TIMEOUT_MS;
+    }
+
+    const esp_err_t deep_err = nvs_get_u32(handle, NVS_KEY_DEEP_SLEEP_MS, &deep_ms);
+    if (deep_err != ESP_OK && deep_err != ESP_ERR_NVS_NOT_FOUND) {
+        mclog::tagWarn(TAG, "failed to read deep sleep timeout: {}", esp_err_to_name(deep_err));
+        deep_ms = DEFAULT_DEEP_SLEEP_TIMEOUT_MS;
+    }
+
+    nvs_close(handle);
+
+    s_soft_sleep_timeout_ms = soft_ms;
+    s_deep_sleep_timeout_ms = deep_ms;
+
+    mclog::tagInfo(TAG,
+                   "sleep timeouts loaded: soft={} ms deep={} ms",
+                   s_soft_sleep_timeout_ms,
+                   s_deep_sleep_timeout_ms);
+}
+
+void saveTimeoutSetting(const char* key, uint32_t timeout_ms)
+{
+    nvs_handle_t handle = 0;
+    const esp_err_t open_err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (open_err != ESP_OK) {
+        mclog::tagWarn(TAG, "failed to open sleep settings NVS: {}", esp_err_to_name(open_err));
+        return;
+    }
+
+    const esp_err_t write_err = nvs_set_u32(handle, key, timeout_ms);
+    if (write_err != ESP_OK) {
+        mclog::tagWarn(TAG, "failed to write sleep setting {}: {}", key, esp_err_to_name(write_err));
+        nvs_close(handle);
+        return;
+    }
+
+    const esp_err_t commit_err = nvs_commit(handle);
+    if (commit_err != ESP_OK) {
+        mclog::tagWarn(TAG, "failed to commit sleep settings NVS: {}", esp_err_to_name(commit_err));
+    }
+
+    nvs_close(handle);
+}
 
 void resetPmg0Sampler()
 {
@@ -245,7 +311,7 @@ void enterDisplayStandby()
     }
 
     mclog::tagInfo(TAG, "display/network standby enter after {} ms idle",
-                   DISPLAY_STANDBY_TIMEOUT_MS);
+                   s_soft_sleep_timeout_ms);
 
     GetHAL().setBackLightBrightness(0);
     GetHAL().getDisplay().sleep();
@@ -355,6 +421,7 @@ void begin()
     }
 
     s_initialized = true;
+    loadTimeoutSettings();
     const esp_sleep_wakeup_cause_t wake_cause = esp_sleep_get_wakeup_cause();
     switch (wake_cause) {
         case ESP_SLEEP_WAKEUP_TIMER:
@@ -482,9 +549,9 @@ void update()
 
     const uint32_t idle_ms = now - s_last_activity_ms;
 
-    // Both the 10-second display/network standby and the 30-second L2 deep sleep
-    // are allowed only while the StopWatch is hanging upside down. If it is not
-    // hanging, treat that as active/handheld use and keep the display/network awake.
+    // Display/network standby and L2 deep sleep are allowed only while the
+    // StopWatch is hanging upside down. If it is not hanging, treat that as
+    // active/handheld use and keep the display/network awake.
     if (!sampleImuIfDue()) {
         return;
     }
@@ -504,10 +571,9 @@ void update()
     if (!hanging) {
         s_sleep_orientation_count = 0;
 
-        // Do not wake the 10-second display/network standby just because the
-        // device moved out of hanging orientation. Standby wake is intentionally
-        // touch/button only; motion/orientation should only prevent entering
-        // deeper L2 sleep.
+        // Do not wake display/network standby just because the device moved out
+        // of hanging orientation. Standby wake is intentionally touch/button
+        // only; motion/orientation should only prevent entering deeper L2 sleep.
         if (!s_display_standby) {
             s_last_activity_ms = now;
         }
@@ -519,12 +585,14 @@ void update()
     }
 
     if (!s_display_standby &&
-        idle_ms >= DISPLAY_STANDBY_TIMEOUT_MS &&
+        s_soft_sleep_timeout_ms > 0 &&
+        idle_ms >= s_soft_sleep_timeout_ms &&
         s_sleep_orientation_count >= SLEEP_CONFIRM_SAMPLES) {
         enterDisplayStandby();
     }
 
-    if (idle_ms >= DEEP_SLEEP_TIMEOUT_MS &&
+    if (s_deep_sleep_timeout_ms > 0 &&
+        idle_ms >= s_deep_sleep_timeout_ms &&
         s_sleep_orientation_count >= SLEEP_CONFIRM_SAMPLES) {
         enterSleep();
     }
@@ -580,6 +648,34 @@ void wake()
     }
 
     exitSleep();
+}
+
+uint32_t softSleepTimeoutMs()
+{
+    return s_soft_sleep_timeout_ms;
+}
+
+uint32_t deepSleepTimeoutMs()
+{
+    return s_deep_sleep_timeout_ms;
+}
+
+void setSoftSleepTimeoutMs(uint32_t timeout_ms, bool save)
+{
+    s_soft_sleep_timeout_ms = timeout_ms;
+    if (save) {
+        saveTimeoutSetting(NVS_KEY_SOFT_SLEEP_MS, timeout_ms);
+    }
+    markActivity();
+}
+
+void setDeepSleepTimeoutMs(uint32_t timeout_ms, bool save)
+{
+    s_deep_sleep_timeout_ms = timeout_ms;
+    if (save) {
+        saveTimeoutSetting(NVS_KEY_DEEP_SLEEP_MS, timeout_ms);
+    }
+    markActivity();
 }
 
 void requestNetworkResume()

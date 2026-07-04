@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <esp_crt_bundle.h>
 #include <esp_err.h>
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -154,6 +155,14 @@ bool begin(const Config& config)
 
     esp_mqtt_client_config_t mqtt_cfg = {};
     mqtt_cfg.broker.address.uri = s_config.uri.c_str();
+
+    // Required for mqtts:// connections through NPMplus/Let's Encrypt.
+    // Without this, esp-tls fails with:
+    // "No server verification option set in esp_tls_cfg_t structure".
+    mqtt_cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
+    //mqtt_cfg.broker.verification.skip_cert_common_name_check = true;
+    mqtt_cfg.broker.verification.common_name = "mqtt.mccarthysirishpub.com";
+
     if (!s_config.client_id.empty()) {
         mqtt_cfg.credentials.client_id = s_config.client_id.c_str();
     }
