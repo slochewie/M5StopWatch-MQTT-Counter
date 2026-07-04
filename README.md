@@ -8,7 +8,7 @@ MQTT-synchronized capacity counter firmware for the M5Stack StopWatch.
 
 M5StopWatch MQTT Counter turns the M5Stack StopWatch into a battery-powered venue capacity counter. The firmware adds a dedicated **Counter** app to the StopWatch launcher, displays the shared count on the round 466 × 466 AMOLED screen, and synchronizes count changes over MQTT.
 
-The project is built with **ESP-IDF** and is based on the original M5Stack StopWatch User Demo firmware. The current firmware focuses on reliable physical-button counting, MQTT synchronization, Wi-Fi/AP Portal provisioning, long-press reset protection, battery publishing, AMOLED-friendly UI assets, and power-management work for hanging/lanyard use.
+The project is built with **ESP-IDF** and is based on the original M5Stack StopWatch User Demo firmware. The current firmware focuses on reliable physical-button counting, MQTT synchronization, Wi-Fi/AP Portal provisioning, configurable wake/sleep behavior, long-press reset protection, battery publishing, AMOLED-friendly UI assets, and power-management work for hanging/lanyard use.
 
 ## Current Features
 
@@ -28,9 +28,9 @@ The project is built with **ESP-IDF** and is based on the original M5Stack StopW
 - State publish payload includes the device name.
 - Incoming state accepts a plain integer or JSON with a `value` field.
 - Battery percentage publishing on a derived battery topic.
-- Settings app controls for Wi-Fi, MQTT, appliance mode, and startup app.
+- Settings app controls for Wi-Fi, MQTT, wake behavior, appliance mode, and startup app.
+- Configurable Soft Sleep and Deep Sleep timeouts from **Settings → Device → Wake Settings**.
 - Optional startup directly into the Counter app.
-- 10-second display/network standby and 30-second ESP32-S3 deep-sleep path under active testing.
 
 ## User Interface
 
@@ -202,7 +202,7 @@ idf.py menuconfig
 idf.py build
 ```
 
-The generated application binary is now named from the root ESP-IDF project declaration:
+The generated application binary is named from the root ESP-IDF project declaration:
 
 ```text
 build/StopWatch-MQTT-Counter.bin
@@ -236,9 +236,10 @@ M5StopWatch-MQTT-Counter/
 │   │   ├── app_launcher/
 │   │   ├── app_setup/
 │   │   └── common/
-│   │       └── network/
-│   │           ├── wifi_service.*
-│   │           └── mqtt_service.*
+│   │       ├── network/
+│   │       │   ├── wifi_service.*
+│   │       │   └── mqtt_service.*
+│   │       └── sleep_manager/
 │   └── assets/
 │       └── images/
 ├── components/
@@ -262,11 +263,13 @@ Power management is active development but no longer purely theoretical.
 
 Current behavior in the system sleep manager:
 
-- 10 seconds idle while hanging: display/network standby.
-- 30 seconds idle while hanging: ESP32-S3 native deep sleep target.
-- Display standby turns off the backlight, sleeps the display, pauses Wi-Fi/MQTT recovery, and stops Wi-Fi.
-- Standby wakes from touch or physical button activity.
-- Deep sleep is configured for touch wake on GPIO13 / `G13_TP_INT`.
+- Soft Sleep and Deep Sleep are configurable in **Settings → Device → Wake Settings**.
+- Soft Sleep defaults to 15 seconds and can be set to Never, 15 seconds, 30 seconds, 45 seconds, 1 minute, or 2 minutes.
+- Deep Sleep defaults to 45 seconds and can be set to Never, 30 seconds, 45 seconds, 1 minute, 2 minutes, 5 minutes, 10 minutes, or 30 minutes.
+- Both sleep stages are only entered while the StopWatch is in the hanging/lanyard orientation.
+- Soft Sleep turns off the backlight, sleeps the display, pauses Wi-Fi/MQTT recovery, and stops Wi-Fi.
+- Soft Sleep wakes from touch or physical button activity.
+- Deep Sleep is configured for touch wake on GPIO13 / `G13_TP_INT`.
 - Network recovery is deferred until needed after wake.
 
 See [`docs/power-management.md`](docs/power-management.md) for details and known limitations.
@@ -294,8 +297,9 @@ Recent focus:
 - AMOLED-optimized launcher artwork
 - Wi-Fi service and AP Portal provisioning
 - MQTT synchronization reliability
+- Configurable wake/sleep settings
 - Long-press reset safety
 - Battery publishing
-- Settings controls for Wi-Fi/MQTT/startup behavior
+- Settings controls for Wi-Fi/MQTT/wake/startup behavior
 - Round-display UI documentation
 - Sleep/wake architecture testing
