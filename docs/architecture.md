@@ -2,7 +2,7 @@
 
 ## Overview
 
-M5StopWatch MQTT Counter adds a dedicated **Counter** app to the M5Stack StopWatch firmware. The app turns the StopWatch into a handheld/lanyard-friendly venue capacity counter with physical button input, a round AMOLED UI, MQTT synchronization, battery publishing, and power-management behavior for idle hanging use.
+M5StopWatch MQTT Counter adds a dedicated **Counter** app to the M5Stack StopWatch firmware. The app turns the StopWatch into a handheld/lanyard-friendly venue capacity counter with physical button input, a round AMOLED UI, MQTT synchronization, battery publishing, and configurable power-management behavior for idle hanging use.
 
 The project is designed around a shared MQTT counter state. In a multi-device deployment, Node-RED remains the recommended authoritative owner of the count. StopWatch devices publish local changes and subscribe to the shared retained state so each device, dashboard, and display client stays synchronized.
 
@@ -98,6 +98,7 @@ The Settings app exposes runtime controls that affect the architecture:
 
 - Wi-Fi on/off
 - MQTT on/off
+- Wake Settings: configurable Soft Sleep and Deep Sleep timeouts
 - Appliance Mode on/off
 - Startup App: Counter or Launcher
 - Brightness, volume, button settings, time/date, and firmware/about screens inherited from the base firmware
@@ -195,11 +196,12 @@ Power management is owned by the system sleep manager rather than by the Counter
 
 Current behavior:
 
-- 10 seconds idle while hanging: display/network standby.
-- 30 seconds idle while hanging: ESP32-S3 native deep sleep target.
-- Standby turns off the backlight, sleeps the display, pauses MQTT/Wi-Fi recovery, and stops Wi-Fi.
-- Standby wakes from touch or physical button activity.
-- Deep sleep is configured for EXT0 touch wake on GPIO13 / `G13_TP_INT`.
+- Soft Sleep timeout is configurable from Settings and defaults to 15 seconds.
+- Deep Sleep timeout is configurable from Settings and defaults to 45 seconds.
+- Both sleep stages are gated by hanging/lanyard orientation.
+- Soft Sleep turns off the backlight, sleeps the display, pauses MQTT/Wi-Fi recovery, and stops Wi-Fi.
+- Soft Sleep wakes from touch or physical button activity.
+- Deep Sleep is configured for EXT0 touch wake on GPIO13 / `G13_TP_INT`.
 - Network recovery is deferred until requested after wake.
 - Counter publishes request network resume when needed.
 
