@@ -28,7 +28,7 @@ The project is built with **ESP-IDF** and is based on the original M5Stack StopW
 - State publish payload includes the device name.
 - Incoming state accepts a plain integer or JSON with a `value` field.
 - Battery percentage publishing on a derived battery topic.
-- Settings app controls for Wi-Fi, MQTT, wake behavior, appliance mode, and startup app.
+- Settings app controls for Wi-Fi, MQTT, Wake Settings, appliance mode, and startup app.
 - Configurable Soft Sleep and Deep Sleep timeouts from **Settings → Device → Wake Settings**.
 - Optional startup directly into the Counter app.
 
@@ -264,13 +264,17 @@ Power management is active development but no longer purely theoretical.
 Current behavior in the system sleep manager:
 
 - Soft Sleep and Deep Sleep are configurable in **Settings → Device → Wake Settings**.
-- Soft Sleep defaults to 15 seconds and can be set to Never, 15 seconds, 30 seconds, 45 seconds, 1 minute, or 2 minutes.
-- Deep Sleep defaults to 45 seconds and can be set to Never, 30 seconds, 45 seconds, 1 minute, 2 minutes, 5 minutes, 10 minutes, or 30 minutes.
 - Both sleep stages are only entered while the StopWatch is in the hanging/lanyard orientation.
+- Selecting **Never** disables that sleep stage.
 - Soft Sleep turns off the backlight, sleeps the display, pauses Wi-Fi/MQTT recovery, and stops Wi-Fi.
 - Soft Sleep wakes from touch or physical button activity.
 - Deep Sleep is configured for touch wake on GPIO13 / `G13_TP_INT`.
 - Network recovery is deferred until needed after wake.
+
+| Setting | Default | Choices |
+| --- | --- | --- |
+| Soft Sleep | 15 seconds | Never, 15 seconds, 30 seconds, 45 seconds, 1 minute, 2 minutes |
+| Deep Sleep | 45 seconds | Never, 30 seconds, 45 seconds, 1 minute, 2 minutes, 5 minutes, 10 minutes, 30 minutes |
 
 See [`docs/power-management.md`](docs/power-management.md) for details and known limitations.
 
