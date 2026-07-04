@@ -8,7 +8,7 @@ MQTT-synchronized capacity counter firmware for the M5Stack StopWatch.
 
 M5StopWatch MQTT Counter turns the M5Stack StopWatch into a battery-powered venue capacity counter. The firmware adds a dedicated **Counter** app to the StopWatch launcher, displays the shared count on the round 466 × 466 AMOLED screen, and synchronizes count changes over MQTT.
 
-The project is built with **ESP-IDF** and is based on the original M5Stack StopWatch User Demo firmware. The current firmware focuses on reliable physical-button counting, MQTT synchronization, long-press reset protection, battery publishing, AMOLED-friendly UI assets, and power-management work for hanging/lanyard use.
+The project is built with **ESP-IDF** and is based on the original M5Stack StopWatch User Demo firmware. The current firmware focuses on reliable physical-button counting, MQTT synchronization, Wi-Fi/AP Portal provisioning, long-press reset protection, battery publishing, AMOLED-friendly UI assets, and power-management work for hanging/lanyard use.
 
 ## Current Features
 
@@ -22,6 +22,8 @@ The project is built with **ESP-IDF** and is based on the original M5Stack StopW
 - Touchscreen **HOLD RESET** button with approximately 2-second long-press protection.
 - Count clamped at zero.
 - Last count persisted to NVS.
+- Dedicated `wifi_service` for Wi-Fi connection management and recovery.
+- AP Portal support for first-time Wi-Fi provisioning and network recovery.
 - MQTT state synchronization through the configured counter state topic.
 - State publish payload includes the device name.
 - Incoming state accepts a plain integer or JSON with a `value` field.
@@ -70,6 +72,14 @@ Target device:
 | Touchscreen **HOLD RESET** button | Reset after long press |
 | Home gesture/button event | Return to launcher |
 
+## Wi-Fi and Provisioning
+
+The firmware uses `main/apps/common/network/wifi_service` as the central Wi-Fi manager. It owns Wi-Fi startup, connection status, recovery, and sleep/wake coordination.
+
+The AP Portal is used for first-time configuration and recovery when stored Wi-Fi credentials are missing or no longer work. After Wi-Fi is available, `mqtt_service` uses that connection to reach the MQTT broker, subscribe to counter/time topics, and publish counter and battery state.
+
+See [`docs/wifi.md`](docs/wifi.md) for more detail.
+
 ## MQTT Defaults
 
 Default device/runtime configuration is defined in `components/device_config`.
@@ -113,7 +123,7 @@ Payload:
       │ StopWatch #1    │
       │ Counter app     │
       └───────┬─────────┘
-              │ MQTT state/battery
+              │ Wi-Fi / MQTT state / battery
               ▼
       ┌─────────────────┐
       │ MQTT Broker     │
@@ -135,7 +145,7 @@ Other clients          other MQTT clients
 
 Node-RED remains the recommended authoritative owner of the shared counter value. StopWatch devices subscribe to the state topic and publish updated values when local button or reset actions occur.
 
-See [`docs/architecture.md`](docs/architecture.md) and [`docs/mqtt.md`](docs/mqtt.md) for more detail.
+See [`docs/architecture.md`](docs/architecture.md), [`docs/wifi.md`](docs/wifi.md), and [`docs/mqtt.md`](docs/mqtt.md) for more detail.
 
 ## Screenshots
 
@@ -162,7 +172,7 @@ This project is developed and flashed with Espressif ESP-IDF.
 
 ### Requirements
 
-- ESP-IDF v5.x
+- ESP-IDF v5.5.x recommended
 - Python 3.x
 - Git
 - USB-C connection to the M5Stack StopWatch
@@ -192,6 +202,12 @@ idf.py menuconfig
 idf.py build
 ```
 
+The generated application binary is now named from the root ESP-IDF project declaration:
+
+```text
+build/StopWatch-MQTT-Counter.bin
+```
+
 ### Flash
 
 ```bash
@@ -210,8 +226,6 @@ Flash and monitor:
 idf.py flash monitor
 ```
 
-Current build output still uses the inherited ESP-IDF project name `StopWatch-UserDemo` because the root `CMakeLists.txt` still declares `project(StopWatch-UserDemo)`.
-
 ## Repository Structure
 
 ```text
@@ -222,6 +236,9 @@ M5StopWatch-MQTT-Counter/
 │   │   ├── app_launcher/
 │   │   ├── app_setup/
 │   │   └── common/
+│   │       └── network/
+│   │           ├── wifi_service.*
+│   │           └── mqtt_service.*
 │   └── assets/
 │       └── images/
 ├── components/
@@ -232,6 +249,7 @@ M5StopWatch-MQTT-Counter/
 │   ├── building.md
 │   ├── mqtt.md
 │   ├── power-management.md
+│   ├── wifi.md
 │   └── screenshots/
 ├── CMakeLists.txt
 ├── sdkconfig.defaults
@@ -246,7 +264,7 @@ Current behavior in the system sleep manager:
 
 - 10 seconds idle while hanging: display/network standby.
 - 30 seconds idle while hanging: ESP32-S3 native deep sleep target.
-- Display standby turns off the backlight, sleeps the display, and pauses Wi-Fi/MQTT recovery.
+- Display standby turns off the backlight, sleeps the display, pauses Wi-Fi/MQTT recovery, and stops Wi-Fi.
 - Standby wakes from touch or physical button activity.
 - Deep sleep is configured for touch wake on GPIO13 / `G13_TP_INT`.
 - Network recovery is deferred until needed after wake.
@@ -274,6 +292,7 @@ Recent focus:
 
 - Counter launcher integration
 - AMOLED-optimized launcher artwork
+- Wi-Fi service and AP Portal provisioning
 - MQTT synchronization reliability
 - Long-press reset safety
 - Battery publishing
